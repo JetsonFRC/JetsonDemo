@@ -1,5 +1,5 @@
-#ifndef VISION
-#define VISION
+#ifndef VISION_HPP
+#define VISION_HPP
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -29,8 +29,7 @@ struct VisionResultsPackage {
             "LL_x,LL_y,"
             "LR_x,LR_y,"
             "UpperWidth,LowerWidth,"
-            "LeftHeight,RightHeight,"
-            "SampleHue,SampleSat,SampleVal";
+            "LeftHeight,RightHeight";
     }
 
     string createCSVLine () {
@@ -43,8 +42,7 @@ struct VisionResultsPackage {
         ss << ll.x << "," << ll.y << ",";
         ss << lr.x << "," << lr.y << ",";
         ss << upperWidth << "," << lowerWidth << ",";
-        ss << leftHeight << "," << rightHeight << ",";
-        ss << sampleHue << "," << sampleSat << "," << sampleVal;
+        ss << leftHeight << "," << rightHeight;
         return ss.str();
     }
 };
@@ -52,9 +50,9 @@ struct VisionResultsPackage {
 typedef std::vector<cv::Point> contour_type;
 
 const int RES_X = 320, RES_Y = 240;
-const int MIN_HUE = 60, MAX_HUE = 90;
+const int MIN_HUE = 55, MAX_HUE = 65;
 const int MIN_SAT = 0, MAX_SAT = 255;
-const int MIN_VAL = 20, MAX_VAL = 255;
+const int MIN_VAL = 50, MAX_VAL = 255;
 
 const double
 MIN_AREA = 0.001, MAX_AREA = 1000000,
@@ -73,5 +71,7 @@ MIN_AREA_RAT = 0.85, MAX_AREA_RAT = 100; //cvxhull area / contour area
  * @return results of vision processing (e.g location of target, timestamp)
  */ 
 VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage);
+void drawOnImage (cv::Mat &img, VisionResultsPackage info);
+VisionResultsPackage processingFailurePackage(ui64 time);
 
 #endif

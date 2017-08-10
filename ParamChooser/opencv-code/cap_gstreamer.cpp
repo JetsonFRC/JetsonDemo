@@ -1,0 +1,1433 @@
+/*M///////////////////////////////////////////////////////////////////////////////////////
+//
+//  IMPORTANT: READ BEFORE DOWNLOADING, COPYING, INSTALLING OR USING.
+//
+//  By downloading, copying, installing or using the software you agree to this license.
+//  If you do not agree to this license, do not download, install,
+//  copy or use the software.
+//
+//
+//                        Intel License Agreement
+//                For Open Source Computer Vision Library
+//
+// Copyright (C) 2008, 2011, Nils Hasler, all rights reserved.
+// Third party copyrights are property of their respective owners.
+//
+// Redistribution and use in source and binary forms, with or without modification,
+// are permitted provided that the following conditions are met:
+//
+//   * Redistribution's of source code must retain the above copyright notice,
+//     this list of conditions and the following disclaimer.
+//
+//   * Redistribution's in binary form must reproduce the above copyright notice,
+//     this list of conditions and the following disclaimer in the documentation
+//     and/or other materials provided with the distribution.
+//
+//   * The name of Intel Corporation may not be used to endorse or promote products
+//     derived from this software without specific prior written permission.
+//
+// This software is provided by the copyright holders and contributors "as is" and
+// any express or implied warranties, including, but not limited to, the implied
+// warranties of merchantability and fitness for a particular purpose are disclaimed.
+// In no event shall the Intel Corporation or contributors be liable for any direct,
+// indirect, incidental, special, exemplary, or consequential damages
+// (including, but not limited to, procurement of substitute goods or services;
+// loss of use, data, or profits; or business interruption) however caused
+// and on any theory of liability, whether in contract, strict liability,
+// or tort (including negligence or otherwise) arising in any way out of
+// the use of this software, even if advised of the possibility of such damage.
+//
+//M*/
+
+/*!
+ * \file cap_gstreamer.cpp
+ * \author Nils Hasler <hasler@mpi-inf.mpg.de>
+ *         Max-Planck-Institut Informatik
+ * \author Dirk Van Haerenborgh <vhdirk@gmail.com>
+ *
+ * \brief Use GStreamer to read/write video
+ */
+
+
+#include "cap_gstreamer.hpp"
+
+/*!
+ * \brief The gst_initializer class
+ * Initializes gstreamer once in the whole process
+ */
+class gst_initializer
+{
+public:
+    static void init()
+    {
+        gst_initializer_mutex.lock();
+        static gst_initializer init;
+        gst_initializer_mutex.unlock();
+    }
+private:
+    gst_initializer()
+    {
+        gst_init(NULL, NULL);
+//        gst_debug_set_active(1);
+//        gst_debug_set_colored(1);
+//        gst_debug_set_default_threshold(GST_LEVEL_INFO);
+    }
+};
+
+
+/*!
+ * \brief CvCapture_GStreamer::init
+ * inits the class
+ */
+void CvCapture_GStreamer::init()
+{
+    pipeline = NULL;
+    uridecodebin = NULL;
+    v4l2src = NULL;
+    color = NULL;
+    sink = NULL;
+
+    sample = NULL;
+    info = new GstMapInfo;
+
+    buffer = NULL;
+    caps = NULL;
+    frame = NULL;
+    duration = -1;
+    width = -1;
+    height = -1;
+    fps = -1;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::close
+ * Closes the pipeline and destroys all instances
+ */
+void CvCapture_GStreamer::close()
+{
+    if (isPipelinePlaying())
+        this->stopPipeline();
+
+    if(pipeline) {
+        gst_element_set_state(GST_ELEMENT(pipeline), GST_STATE_NULL);
+        gst_object_unref(GST_OBJECT(pipeline));
+        pipeline = NULL;
+    }
+
+    duration = -1;
+    width = -1;
+    height = -1;
+    fps = -1;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::grabFrame
+ * \return
+ * Grabs a sample from the pipeline, awaiting consumation by retreiveFrame.
+ * The pipeline is started if it was not running yet
+ */
+bool CvCapture_GStreamer::grabFrame()
+{
+    if(!pipeline)
+        return false;
+
+    // start the pipeline if it was not in playing state yet
+    if(!this->isPipelinePlaying())
+        this->startPipeline();
+
+    // bail out if EOS
+    if(gst_app_sink_is_eos(GST_APP_SINK(sink)))
+        return false;
+
+    if(sample)
+        gst_sample_unref(sample);
+
+    sample = gst_app_sink_pull_sample(GST_APP_SINK(sink));
+
+    if(!sample)
+        return false;
+
+    buffer = gst_sample_get_buffer(sample);
+
+    if(!buffer)
+        return false;
+
+    return true;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::retrieveFrame
+ * \return IplImage pointer. [Transfer Full]
+ *  Retreive the previously grabbed buffer, and wrap it in an IPLImage structure
+ */
+IplImage * CvCapture_GStreamer::retrieveFrame(int)
+{
+    if(!buffer)
+        return 0;
+
+    //construct a frame header if we did not have any yet
+    if(!frame)
+    {
+        GstCaps* buffer_caps = gst_sample_get_caps(sample);
+
+        // bail out in no caps
+        assert(gst_caps_get_size(buffer_caps) == 1);
+        GstStructure* structure = gst_caps_get_structure(buffer_caps, 0);
+
+        // bail out if width or height are 0
+        if(!gst_structure_get_int(structure, "width", &width) ||
+                !gst_structure_get_int(structure, "height", &height))
+        {
+            gst_caps_unref(buffer_caps);
+            return 0;
+        }
+
+        int depth = 3;
+
+        depth = 0;
+        const gchar* name = gst_structure_get_name(structure);
+        const gchar* format = gst_structure_get_string(structure, "format");
+
+        if (!name || !format)
+            return 0;
+
+        // we support 3 types of data:
+        //     video/x-raw, format=BGR   -> 8bit, 3 channels
+        //     video/x-raw, format=GRAY8 -> 8bit, 1 channel
+        //     video/x-bayer             -> 8bit, 1 channel
+        // bayer data is never decoded, the user is responsible for that
+        // everything is 8 bit, so we just test the caps for bit depth
+
+        if (strcasecmp(name, "video/x-raw") == 0)
+        {
+            if (strcasecmp(format, "BGR") == 0) {
+                depth = 3;
+            }
+            else if(strcasecmp(format, "GRAY8") == 0){
+                depth = 1;
+            }
+        }
+        else if (strcasecmp(name, "video/x-bayer") == 0)
+        {
+            depth = 1;
+        }
+        if (depth > 0) {
+            frame = cvCreateImageHeader(cvSize(width, height), IPL_DEPTH_8U, depth);
+        } else {
+            gst_caps_unref(buffer_caps);
+            return 0;
+        }
+
+        gst_caps_unref(buffer_caps);
+    }
+
+    // gstreamer expects us to handle the memory at this point
+    // so we can just wrap the raw buffer and be done with it
+
+    // the data ptr in GstMapInfo is only valid throughout the mapifo objects life.
+    // TODO: check if reusing the mapinfo object is ok.
+
+    gboolean success = gst_buffer_map(buffer,info, (GstMapFlags)GST_MAP_READ);
+    if (!success){
+        //something weird went wrong here. abort. abort.
+        //fprintf(stderr,"GStreamer: unable to map buffer");
+        return 0;
+    }
+    frame->imageData = (char*)info->data;
+    gst_buffer_unmap(buffer,info);
+
+    return frame;
+}
+
+
+/*!
+ * \brief CvCapture_GStreamer::isPipelinePlaying
+ * \return if the pipeline is currently playing.
+ */
+bool CvCapture_GStreamer::isPipelinePlaying()
+{
+    GstState current, pending;
+    GstClockTime timeout = 5*GST_SECOND;
+    if(!GST_IS_ELEMENT(pipeline)){
+        return false;
+    }
+
+    GstStateChangeReturn ret = gst_element_get_state(GST_ELEMENT(pipeline),&current, &pending, timeout);
+    if (!ret){
+        //fprintf(stderr, "GStreamer: unable to query pipeline state\n");
+        return false;
+    }
+
+    return current == GST_STATE_PLAYING;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::startPipeline
+ * Start the pipeline by setting it to the playing state
+ */
+void CvCapture_GStreamer::startPipeline()
+{
+    CV_FUNCNAME("icvStartPipeline");
+
+    __BEGIN__;
+
+    //fprintf(stderr, "relinked, pausing\n");
+    GstStateChangeReturn status = gst_element_set_state(GST_ELEMENT(pipeline), GST_STATE_PLAYING);
+    if (status == GST_STATE_CHANGE_ASYNC)
+    {
+        // wait for status update
+        status = gst_element_get_state(pipeline, NULL, NULL, GST_CLOCK_TIME_NONE);
+    }
+    if (status == GST_STATE_CHANGE_FAILURE)
+    {
+        handleMessage(pipeline);
+        gst_object_unref(pipeline);
+        pipeline = NULL;
+        CV_ERROR(CV_StsError, "GStreamer: unable to start pipeline\n");
+        return;
+    }
+
+    //printf("state now playing\n");
+    handleMessage(pipeline);
+    __END__;
+}
+
+
+/*!
+ * \brief CvCapture_GStreamer::stopPipeline
+ * Stop the pipeline by setting it to NULL
+ */
+void CvCapture_GStreamer::stopPipeline()
+{
+    CV_FUNCNAME("icvStopPipeline");
+
+    __BEGIN__;
+
+    //fprintf(stderr, "restarting pipeline, going to ready\n");
+    if(gst_element_set_state(GST_ELEMENT(pipeline), GST_STATE_NULL) ==
+            GST_STATE_CHANGE_FAILURE) {
+        CV_ERROR(CV_StsError, "GStreamer: unable to stop pipeline\n");
+        gst_object_unref(pipeline);
+        pipeline = NULL;
+        return;
+    }
+    __END__;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::restartPipeline
+ * Restart the pipeline
+ */
+void CvCapture_GStreamer::restartPipeline()
+{
+    handleMessage(pipeline);
+
+    this->stopPipeline();
+    this->startPipeline();
+}
+
+
+/*!
+ * \brief CvCapture_GStreamer::setFilter
+ * \param prop the property name
+ * \param type glib property type
+ * \param v1 the value
+ * \param v2 second value of property type requires it, else NULL
+ * Filter the output formats by setting appsink caps properties
+ */
+void CvCapture_GStreamer::setFilter(const char *prop, int type, int v1, int v2)
+{
+    //printf("GStreamer: setFilter \n");
+    if(!caps || !( GST_IS_CAPS (caps) ))
+    {
+        if(type == G_TYPE_INT)
+        {
+            caps = gst_caps_new_simple("video/x-raw","format",G_TYPE_STRING,"BGR", prop, type, v1, NULL);
+        }
+        else
+        {
+            caps = gst_caps_new_simple("video/x-raw","format",G_TYPE_STRING,"BGR", prop, type, v1, v2, NULL);
+        }
+    }
+    else
+    {
+        if (! gst_caps_is_writable(caps))
+            caps = gst_caps_make_writable (caps);
+        if(type == G_TYPE_INT){
+            gst_caps_set_simple(caps, prop, type, v1, NULL);
+        }else{
+            gst_caps_set_simple(caps, prop, type, v1, v2, NULL);
+        }
+    }
+
+    caps = gst_caps_fixate(caps);
+
+    gst_app_sink_set_caps(GST_APP_SINK(sink), caps);
+    //printf("filtering with %s\n", gst_caps_to_string(caps));
+}
+
+
+/*!
+ * \brief CvCapture_GStreamer::removeFilter
+ * \param filter filter to remove
+ * remove the specified filter from the appsink template caps
+ */
+void CvCapture_GStreamer::removeFilter(const char *filter)
+{
+    if(!caps)
+        return;
+
+    if (! gst_caps_is_writable(caps))
+        caps = gst_caps_make_writable (caps);
+
+    GstStructure *s = gst_caps_get_structure(caps, 0);
+    gst_structure_remove_field(s, filter);
+
+    gst_app_sink_set_caps(GST_APP_SINK(sink), caps);
+}
+
+/*!
+ * \brief CvCapture_GStreamer::newPad link dynamic padd
+ * \param pad
+ * \param data
+ * decodebin creates pads based on stream information, which is not known upfront
+ * on receiving the pad-added signal, we connect it to the colorspace conversion element
+ */
+void CvCapture_GStreamer::newPad(GstElement * /*elem*/,
+                                 GstPad     *pad,
+                                 gpointer    data)
+{
+    GstPad *sinkpad;
+    GstElement *color = (GstElement *) data;
+
+    sinkpad = gst_element_get_static_pad (color, "sink");
+    if (!sinkpad){
+        return;
+    }
+
+    gst_pad_link (pad, sinkpad);
+    gst_object_unref (sinkpad);
+}
+
+/*!
+ * \brief CvCapture_GStreamer::open Open the given file with gstreamer
+ * \param type CvCapture type. One of CV_CAP_GSTREAMER_*
+ * \param filename Filename to open in case of CV_CAP_GSTREAMER_FILE
+ * \return boolean. Specifies if opening was succesful.
+ *
+ * In case of CV_CAP_GSTREAMER_V4L(2), a pipelin is constructed as follows:
+ *    v4l2src ! autoconvert ! appsink
+ *
+ *
+ * The 'filename' parameter is not limited to filesystem paths, and may be one of the following:
+ *
+ *  - a normal filesystem path:
+ *        e.g. video.avi or /path/to/video.avi or C:\\video.avi
+ *  - an uri:
+ *        e.g. file:///path/to/video.avi or rtsp:///path/to/stream.asf
+ *  - a gstreamer pipeline description:
+ *        e.g. videotestsrc ! videoconvert ! appsink
+ *        the appsink name should be either 'appsink0' (the default) or 'opencvsink'
+ *
+ *  When dealing with a file, CvCapture_GStreamer will not drop frames if the grabbing interval
+ *  larger than the framerate period. (Unlike the uri or manual pipeline description, which assume
+ *  a live source)
+ *
+ *  The pipeline will only be started whenever the first frame is grabbed. Setting pipeline properties
+ *  is really slow if we need to restart the pipeline over and over again.
+ *
+ *  TODO: the 'type' parameter is imo unneeded. for v4l2, filename 'v4l2:///dev/video0' can be used.
+ *  I expect this to be the same for CV_CAP_GSTREAMER_1394. Is anyone actually still using v4l (v1)?
+ *
+ */
+bool CvCapture_GStreamer::open(int type,
+  const char * filename) {
+  CV_FUNCNAME("cvCaptureFromCAM_GStreamer");
+
+  __BEGIN__;
+
+  gst_initializer::init();
+
+  bool file = false;
+  bool stream = false;
+  bool manualpipeline = false;
+  char * uri = NULL;
+  uridecodebin = NULL;
+  GstElementFactory * testfac;
+  GstStateChangeReturn status;
+
+  int cameraID = -1;
+  if (type == CV_CAP_GSTREAMER_V4L ||
+    type == CV_CAP_GSTREAMER_V4L2) {
+    cameraID = static_cast < int > (reinterpret_cast < intptr_t > (filename));
+  }
+
+  std::stringstream stdstream;
+  std::string stdfilename;
+
+  if (type == CV_CAP_GSTREAMER_V4L) {
+    testfac = gst_element_factory_find("v4lsrc");
+    if (!testfac) {
+      return false;
+    }
+    g_object_unref(G_OBJECT(testfac));
+
+    stdstream << "v4lsrc device=/dev/video" << cameraID << " ! " << COLOR_ELEM << " ! appsink";
+    stdfilename = stdstream.str();
+    filename = stdfilename.c_str();
+  } else if (type == CV_CAP_GSTREAMER_V4L2) {
+    testfac = gst_element_factory_find("v4l2src");
+    if (!testfac) {
+      return false;
+    }
+    g_object_unref(G_OBJECT(testfac));
+
+    stdstream << "v4l2src device=/dev/video" << cameraID << " ! " << COLOR_ELEM << " ! appsink";
+    stdfilename = stdstream.str();
+    //printf("STD FILENAME: %s\n", stdfilename.c_str());
+    //printf("COLOR ELEM: %s\n", COLOR_ELEM);
+    filename = stdfilename.c_str();
+    //printf("FILENAME: %s\n", filename);
+  }
+
+  // test if we have a valid uri. If so, open it with an uridecodebin
+  // else, we might have a file or a manual pipeline.
+  // if gstreamer cannot parse the manual pipeline, we assume we were given and
+  // ordinary file path.
+  if (!gst_uri_is_valid(filename)) {
+    uri = realpath(filename, NULL);
+    //printf("filename: %s\n", filename);
+    stream = false;
+    if (uri) {
+      uri = g_filename_to_uri(uri, NULL, NULL);
+      printf("URI2: %s\n", uri);
+      if (uri) {
+        file = true;
+      } else {
+        CV_WARN("GStreamer: Error opening file\n");
+        close();
+        return false;
+      }
+    } else {
+      GError * err = NULL;
+      uridecodebin = gst_parse_launch(filename, & err);
+      if (!uridecodebin) {
+        printf("GStreamer: Error opening bin: %s\n", err -> message);
+        fprintf(stderr, "GStreamer: Error opening bin: %s\n", err -> message);
+        return false;
+      } else {
+        printf("GStreamer succesfully opened bin\n");
+      }
+
+      stream = true;
+      manualpipeline = true;
+    }
+  } else {
+    stream = true;
+    uri = g_strdup(filename);
+  }
+
+  bool element_from_uri = false;
+  if (!uridecodebin) {
+    // At this writing, the v4l2 element (and maybe others too) does not support caps renegotiation.
+    // This means that we cannot use an uridecodebin when dealing with v4l2, since setting
+    // capture properties will not work.
+    // The solution (probably only until gstreamer 1.2) is to make an element from uri when dealing with v4l2.
+    gchar * protocol = gst_uri_get_protocol(uri);
+    printf("PROTOCOL: %s\n", protocol);
+    if (!strcasecmp(protocol, "v4l2")) {
+      uridecodebin = gst_element_make_from_uri(GST_URI_SRC, uri, "src", NULL);
+      element_from_uri = true;
+    } else {
+      uridecodebin = gst_element_factory_make("uridecodebin", NULL);
+      g_object_set(G_OBJECT(uridecodebin), "uri", uri, NULL);
+    }
+    g_free(protocol);
+
+    if (!uridecodebin) {
+      //fprintf(stderr, "GStreamer: Error opening bin: %s\n", err->message);
+      close();
+      return false;
+    }
+  }
+
+  if (manualpipeline) {
+    printf ("using manual pipeline\n");
+    GstIterator * it = gst_bin_iterate_elements(GST_BIN(uridecodebin));
+
+    GstElement * element = NULL;
+    gboolean done = false;
+    gchar * name = NULL;
+    GValue value = G_VALUE_INIT;
+
+    while (!done) {
+      switch (gst_iterator_next(it, & value)) {
+      case GST_ITERATOR_OK:
+        element = GST_ELEMENT(g_value_get_object( & value));
+        name = gst_element_get_name(element);
+        if (name) {
+          if (strstr(name, "opencvsink") != NULL || strstr(name, "appsink") != NULL) {
+            sink = GST_ELEMENT(gst_object_ref(element));
+          } else if (strstr(name, COLOR_ELEM_NAME) != NULL) {
+            color = GST_ELEMENT(gst_object_ref(element));
+          } else if (strstr(name, "v4l") != NULL) {
+            v4l2src = GST_ELEMENT(gst_object_ref(element));
+          }
+          g_free(name);
+
+          done = sink && color && v4l2src;
+        }
+        g_value_unset( & value);
+
+        break;
+      case GST_ITERATOR_RESYNC:
+        gst_iterator_resync(it);
+        break;
+      case GST_ITERATOR_ERROR:
+      case GST_ITERATOR_DONE:
+        done = TRUE;
+        break;
+      }
+    }
+    gst_iterator_free(it);
+
+    if (!sink) {
+      CV_ERROR(CV_StsError, "GStreamer: cannot find appsink in manual pipeline\n");
+      return false;
+    }
+
+    pipeline = uridecodebin;
+    printf ("set manual pipeline\n");
+  } else {
+    pipeline = gst_pipeline_new(NULL);
+    // videoconvert (in 0.10: ffmpegcolorspace, in 1.x autovideoconvert)
+    //automatically selects the correct colorspace conversion based on caps.
+    color = gst_element_factory_make(COLOR_ELEM, NULL);
+    sink = gst_element_factory_make("appsink", NULL);
+
+    gst_bin_add_many(GST_BIN(pipeline), uridecodebin, color, sink, NULL);
+
+    if (element_from_uri) {
+      if (!gst_element_link(uridecodebin, color)) {
+        CV_ERROR(CV_StsError, "GStreamer: cannot link color -> sink\n");
+        gst_object_unref(pipeline);
+        pipeline = NULL;
+        return false;
+      }
+    } else {
+      g_signal_connect(uridecodebin, "pad-added", G_CALLBACK(newPad), color);
+    }
+
+    if (!gst_element_link(color, sink)) {
+      CV_ERROR(CV_StsError, "GStreamer: cannot link color -> sink\n");
+      gst_object_unref(pipeline);
+      pipeline = NULL;
+      return false;
+    }
+  }
+
+  //TODO: is 1 single buffer really high enough?
+  gst_app_sink_set_max_buffers(GST_APP_SINK(sink), 1);
+  gst_app_sink_set_drop(GST_APP_SINK(sink), stream);
+
+  //do not emit signals: all calls will be synchronous and blocking
+  gst_app_sink_set_emit_signals(GST_APP_SINK(sink), 0);
+
+  // support 1 and 3 channel 8 bit data, as well as bayer (also  1 channel, 8bit)
+  //caps = gst_caps_from_string("video/x-raw, format=(string){BGR, GRAY8}; video/x-bayer,format=(string){rggb,bggr,grbg,gbrg}");
+  caps = gst_caps_from_string("video/x-raw,format=(string)BGR");
+
+  gst_app_sink_set_caps(GST_APP_SINK(sink), caps);
+  gst_caps_unref(caps);
+  printf ("set caps\n");
+  {
+    status = gst_element_set_state(GST_ELEMENT(pipeline),
+      file ? GST_STATE_PAUSED : GST_STATE_PLAYING);
+
+    printf ("pipeline status: %d\n", status);
+
+    if (status == GST_STATE_CHANGE_ASYNC) {
+      // wait for status update
+      status = gst_element_get_state(pipeline, NULL, NULL, GST_CLOCK_TIME_NONE);
+      printf ("pipeline status update recieved: %d\n", status);
+    }
+    if (status == GST_STATE_CHANGE_FAILURE) {
+      handleMessage(pipeline);
+      gst_object_unref(pipeline);
+      pipeline = NULL;
+      CV_ERROR(CV_StsError, "GStreamer: unable to start pipeline\n");
+      return false;
+    }
+
+
+
+    GstFormat format;
+
+    format = GST_FORMAT_DEFAULT;
+
+    if (!gst_element_query_duration(sink, format, & duration)) {
+      handleMessage(pipeline);
+      CV_WARN("GStreamer: unable to query duration of stream");
+      duration = -1;
+    }
+
+    GstPad * pad = gst_element_get_static_pad(color, "src");
+    GstCaps * buffer_caps = gst_pad_get_current_caps(pad);
+    const GstStructure * structure = gst_caps_get_structure(buffer_caps, 0);
+
+    printf ("PAD: %s\nBUFFER CAPS: %s\nSTRUCTURE: %s\n", 
+        "testing",
+        gst_caps_to_string (buffer_caps),
+        gst_structure_to_string (structure));
+
+    if (!gst_structure_get_int(structure, "width", & width)) {
+      CV_WARN("Cannot query video width\n");
+    }
+
+    if (!gst_structure_get_int(structure, "height", & height)) {
+      CV_WARN("Cannot query video heigth\n");
+    }
+
+    gint num = 0, denom = 1;
+    if (!gst_structure_get_fraction(structure, "framerate", & num, & denom)) {
+      CV_WARN("Cannot query video fps\n");
+    }
+
+    fps = (double) num / (double) denom;
+
+    // GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline")
+
+    stopPipeline();
+  }
+
+  __END__;
+
+  return true;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::getProperty retreive the requested property from the pipeline
+ * \param propId requested property
+ * \return property value
+ *
+ * There are two ways the properties can be retreived. For seek-based properties we can query the pipeline.
+ * For frame-based properties, we use the caps of the lasst receivef sample. This means that some properties
+ * are not available until a first frame was received
+ */
+double CvCapture_GStreamer::getProperty( int propId )
+{
+    GstFormat format;
+    gint64 value;
+    gboolean status;
+
+#define FORMAT format
+
+    if(!pipeline) {
+        CV_WARN("GStreamer: no pipeline");
+        return 0;
+    }
+
+    switch(propId) {
+    case CV_CAP_PROP_POS_MSEC:
+        format = GST_FORMAT_TIME;
+        status = gst_element_query_position(sink, FORMAT, &value);
+        if(!status) {
+            CV_WARN("GStreamer: unable to query position of stream");
+            return 0;
+        }
+        return value * 1e-6; // nano seconds to milli seconds
+    case CV_CAP_PROP_POS_FRAMES:
+        format = GST_FORMAT_DEFAULT;
+        status = gst_element_query_position(sink, FORMAT, &value);
+        if(!status) {
+            CV_WARN("GStreamer: unable to query position of stream");
+            return 0;
+        }
+        return value;
+    case CV_CAP_PROP_POS_AVI_RATIO:
+        format = GST_FORMAT_PERCENT;
+        status = gst_element_query_position(sink, FORMAT, &value);
+        if(!status) {
+            CV_WARN("GStreamer: unable to query position of stream");
+            return 0;
+        }
+        return ((double) value) / GST_FORMAT_PERCENT_MAX;
+    case CV_CAP_PROP_FRAME_WIDTH:
+        return width;
+    case CV_CAP_PROP_FRAME_HEIGHT:
+        return height;
+    case CV_CAP_PROP_FPS:
+        return fps;
+    case CV_CAP_PROP_FOURCC:
+        break;
+    case CV_CAP_PROP_FRAME_COUNT:
+        return duration;
+    case CV_CAP_PROP_FORMAT:
+    case CV_CAP_PROP_MODE:
+    case CV_CAP_PROP_BRIGHTNESS:
+    case CV_CAP_PROP_CONTRAST:
+    case CV_CAP_PROP_SATURATION:
+    case CV_CAP_PROP_HUE:
+        if (v4l2src)
+        {
+            const gchar * propName =
+                    propId == CV_CAP_PROP_BRIGHTNESS ? "brightness" :
+                    propId == CV_CAP_PROP_CONTRAST ? "contrast" :
+                    propId == CV_CAP_PROP_SATURATION ? "saturation" :
+                    propId == CV_CAP_PROP_HUE ? "hue" : NULL;
+
+            if (propName)
+            {
+                gint32 value32 = 0;
+                g_object_get(G_OBJECT(v4l2src), propName, &value32, NULL);
+                return value32;
+            }
+        }
+    case CV_CAP_PROP_GAIN:
+    case CV_CAP_PROP_CONVERT_RGB:
+        break;
+    case CV_CAP_GSTREAMER_QUEUE_LENGTH:
+        if(!sink) {
+            CV_WARN("GStreamer: there is no sink yet");
+            return false;
+        }
+        return gst_app_sink_get_max_buffers(GST_APP_SINK(sink));
+    default:
+        CV_WARN("GStreamer: unhandled property");
+        break;
+    }
+
+#undef FORMAT
+
+    return 0;
+}
+
+/*!
+ * \brief CvCapture_GStreamer::setProperty
+ * \param propId
+ * \param value
+ * \return success
+ * Sets the desired property id with val. If the pipeline is running,
+ * it is briefly stopped and started again after the property was set
+ */
+bool CvCapture_GStreamer::setProperty( int propId, double value )
+{
+    GstFormat format;
+    GstSeekFlags flags;
+
+    if(!pipeline) {
+        CV_WARN("GStreamer: no pipeline");
+        return false;
+    }
+
+    bool wasPlaying = this->isPipelinePlaying();
+    if (wasPlaying)
+        this->stopPipeline();
+
+
+    switch(propId) {
+    case CV_CAP_PROP_POS_MSEC:
+        format = GST_FORMAT_TIME;
+        flags = (GstSeekFlags) (GST_SEEK_FLAG_FLUSH|GST_SEEK_FLAG_ACCURATE);
+        if(!gst_element_seek_simple(GST_ELEMENT(pipeline), format,
+                                    flags, (gint64) (value * GST_MSECOND))) {
+            CV_WARN("GStreamer: unable to seek");
+        }
+        break;
+    case CV_CAP_PROP_POS_FRAMES:
+        format = GST_FORMAT_DEFAULT;
+        flags = (GstSeekFlags) (GST_SEEK_FLAG_FLUSH|GST_SEEK_FLAG_ACCURATE);
+        if(!gst_element_seek_simple(GST_ELEMENT(pipeline), format,
+                                    flags, (gint64) value)) {
+            CV_WARN("GStreamer: unable to seek");
+        }
+        break;
+    case CV_CAP_PROP_POS_AVI_RATIO:
+        format = GST_FORMAT_PERCENT;
+        flags = (GstSeekFlags) (GST_SEEK_FLAG_FLUSH|GST_SEEK_FLAG_ACCURATE);
+        if(!gst_element_seek_simple(GST_ELEMENT(pipeline), format,
+                                    flags, (gint64) (value * GST_FORMAT_PERCENT_MAX))) {
+            CV_WARN("GStreamer: unable to seek");
+        }
+        break;
+    case CV_CAP_PROP_FRAME_WIDTH:
+        if(value > 0)
+            setFilter("width", G_TYPE_INT, (int) value, 0);
+        else
+            removeFilter("width");
+        break;
+    case CV_CAP_PROP_FRAME_HEIGHT:
+        if(value > 0)
+            setFilter("height", G_TYPE_INT, (int) value, 0);
+        else
+            removeFilter("height");
+        break;
+    case CV_CAP_PROP_FPS:
+        if(value > 0) {
+            double num=0, denom = 1;
+            toFraction(value, num,  denom);
+            setFilter("framerate", GST_TYPE_FRACTION, value, denom);
+        } else
+            removeFilter("framerate");
+        break;
+    case CV_CAP_PROP_FOURCC:
+    case CV_CAP_PROP_FRAME_COUNT:
+    case CV_CAP_PROP_FORMAT:
+    case CV_CAP_PROP_MODE:
+    case CV_CAP_PROP_BRIGHTNESS:
+    case CV_CAP_PROP_CONTRAST:
+    case CV_CAP_PROP_SATURATION:
+    case CV_CAP_PROP_HUE:
+        if (v4l2src)
+        {
+            const gchar * propName =
+                    propId == CV_CAP_PROP_BRIGHTNESS ? "brightness" :
+                    propId == CV_CAP_PROP_CONTRAST ? "contrast" :
+                    propId == CV_CAP_PROP_SATURATION ? "saturation" :
+                    propId == CV_CAP_PROP_HUE ? "hue" : NULL;
+
+            if (propName)
+            {
+                gint32 value32 = cv::saturate_cast<gint32>(value);
+                g_object_set(G_OBJECT(v4l2src), propName, &value32, NULL);
+                return true;
+            }
+        }
+    case CV_CAP_PROP_GAIN:
+    case CV_CAP_PROP_CONVERT_RGB:
+        break;
+    case CV_CAP_GSTREAMER_QUEUE_LENGTH:
+        if(!sink)
+            break;
+        gst_app_sink_set_max_buffers(GST_APP_SINK(sink), (guint) value);
+        break;
+    default:
+        CV_WARN("GStreamer: unhandled property");
+    }
+
+    if (wasPlaying)
+        this->startPipeline();
+
+    return false;
+}
+
+/*!
+ * \brief cvCreateCapture_GStreamer
+ * \param type
+ * \param filename
+ * \return
+ */
+CvCapture* cvCreateCapture_GStreamer(int type, const char* filename )
+{
+    CvCapture_GStreamer* capture = new CvCapture_GStreamer;
+
+    if( capture->open( type, filename ))
+        return capture;
+
+    delete capture;
+    return 0;
+}
+
+
+
+
+/*!
+ * \brief CvVideoWriter_GStreamer::init
+ * initialise all variables
+ */
+void CvVideoWriter_GStreamer::init()
+{
+    pipeline = NULL;
+    source = NULL;
+    encodebin = NULL;
+    file = NULL;
+    buffer = NULL;
+
+    num_frames = 0;
+    framerate = 0;
+}
+
+/*!
+ * \brief CvVideoWriter_GStreamer::close
+ * ends the pipeline by sending EOS and destroys the pipeline and all
+ * elements afterwards
+ */
+void CvVideoWriter_GStreamer::close()
+{
+    GstStateChangeReturn status;
+    if (pipeline)
+    {
+        handleMessage(pipeline);
+
+        if (gst_app_src_end_of_stream(GST_APP_SRC(source)) != GST_FLOW_OK)
+        {
+            CV_WARN("Cannot send EOS to GStreamer pipeline\n");
+            return;
+        }
+
+        //wait for EOS to trickle down the pipeline. This will let all elements finish properly
+        GstBus* bus = gst_element_get_bus(pipeline);
+        GstMessage *msg = gst_bus_timed_pop_filtered(bus, GST_CLOCK_TIME_NONE, (GstMessageType)(GST_MESSAGE_ERROR | GST_MESSAGE_EOS));
+        if (GST_MESSAGE_TYPE(msg) == GST_MESSAGE_ERROR)
+        {
+            CV_WARN("Error during VideoWriter finalization\n");
+            return;
+        }
+
+        if(msg != NULL)
+        {
+            gst_message_unref(msg);
+            g_object_unref(G_OBJECT(bus));
+        }
+
+        status = gst_element_set_state (pipeline, GST_STATE_NULL);
+        if (status == GST_STATE_CHANGE_ASYNC)
+        {
+            // wait for status update
+            GstState st1;
+            GstState st2;
+            status = gst_element_get_state(pipeline, &st1, &st2, GST_CLOCK_TIME_NONE);
+        }
+        if (status == GST_STATE_CHANGE_FAILURE)
+        {
+            handleMessage (pipeline);
+            gst_object_unref (GST_OBJECT (pipeline));
+            pipeline = NULL;
+            CV_WARN("Unable to stop gstreamer pipeline\n");
+            return;
+        }
+
+        gst_object_unref (GST_OBJECT (pipeline));
+        pipeline = NULL;
+    }
+}
+
+
+/*!
+ * \brief CvVideoWriter_GStreamer::filenameToMimetype
+ * \param filename
+ * \return mimetype
+ * Resturns a container mime type for a given filename by looking at it's extension
+ */
+const char* CvVideoWriter_GStreamer::filenameToMimetype(const char *filename)
+{
+    //get extension
+    const char *ext = strrchr(filename, '.');
+    if(!ext || ext == filename) return NULL;
+    ext += 1; //exclude the dot
+
+    // return a container mime based on the given extension.
+    // gstreamer's function returns too much possibilities, which is not useful to us
+
+    //return the appropriate mime
+    if (strncasecmp(ext,"avi", 3) == 0)
+        return (const char*)"video/x-msvideo";
+
+    if (strncasecmp(ext,"mkv", 3) == 0 || strncasecmp(ext,"mk3d",4) == 0  || strncasecmp(ext,"webm",4) == 0 )
+        return (const char*)"video/x-matroska";
+
+    if (strncasecmp(ext,"wmv", 3) == 0)
+        return (const char*)"video/x-ms-asf";
+
+    if (strncasecmp(ext,"mov", 3) == 0)
+        return (const char*)"video/x-quicktime";
+
+    if (strncasecmp(ext,"ogg", 3) == 0 || strncasecmp(ext,"ogv", 3) == 0)
+        return (const char*)"application/ogg";
+
+    if (strncasecmp(ext,"rm", 3) == 0)
+        return (const char*)"vnd.rn-realmedia";
+
+    if (strncasecmp(ext,"swf", 3) == 0)
+        return (const char*)"application/x-shockwave-flash";
+
+    if (strncasecmp(ext,"mp4", 3) == 0)
+        return (const char*)"video/x-quicktime, variant=(string)iso";
+
+    //default to avi
+    return (const char*)"video/x-msvideo";
+}
+
+/*!
+ * \brief CvVideoWriter_GStreamer::open
+ * \param filename filename to output to
+ * \param fourcc desired codec fourcc
+ * \param fps desired framerate
+ * \param frameSize the size of the expected frames
+ * \param is_color color or grayscale
+ * \return success
+ *
+ * We support 2 modes of operation. Either the user enters a filename and a fourcc
+ * code, or enters a manual pipeline description like in CvVideoCapture_Gstreamer.
+ * In the latter case, we just push frames on the appsink with appropriate caps.
+ * In the former case, we try to deduce the correct container from the filename,
+ * and the correct encoder from the fourcc profile.
+ *
+ * If the file extension did was not recognize, an avi container is used
+ *
+ */
+bool CvVideoWriter_GStreamer::open( const char * filename, int fourcc,
+                                    double fps, CvSize frameSize, bool is_color )
+{
+    CV_FUNCNAME("CvVideoWriter_GStreamer::open");
+
+    // check arguments
+    assert (filename);
+    assert (fps > 0);
+    assert (frameSize.width > 0  &&  frameSize.height > 0);
+
+    // init gstreamer
+    gst_initializer::init();
+
+    // init vars
+    bool manualpipeline = true;
+    int  bufsize = 0;
+    GError *err = NULL;
+    const char* mime = NULL;
+    GstStateChangeReturn stateret;
+
+    GstCaps* caps = NULL;
+    GstCaps* videocaps = NULL;
+
+    GstCaps* containercaps = NULL;
+    GstEncodingContainerProfile* containerprofile = NULL;
+    GstEncodingVideoProfile* videoprofile = NULL;
+
+    GstIterator* it = NULL;
+    gboolean done = FALSE;
+    GstElement *element = NULL;
+    gchar* name = NULL;
+
+    // we first try to construct a pipeline from the given string.
+    // if that fails, we assume it is an ordinary filename
+
+    __BEGIN__;
+
+    encodebin = gst_parse_launch(filename, &err);
+    manualpipeline = (encodebin != NULL);
+
+    //printf ("filename: %s\nerr: %s\ncodebin: %s\n\n", filename, err != NULL ? err -> message : "no error", encodebin);
+
+    if(manualpipeline)
+    {
+        printf ("found manual pipeline\n");
+
+        it = gst_bin_iterate_sources (GST_BIN(encodebin));
+        GValue value = G_VALUE_INIT;
+
+        while (!done) {
+          switch (gst_iterator_next (it, &value)) {
+            case GST_ITERATOR_OK:
+              element = GST_ELEMENT (g_value_get_object (&value));
+              name = gst_element_get_name(element);
+              if (name){
+                if(strstr(name, "opencvsrc") != NULL || strstr(name, "appsrc") != NULL) {
+                  source = GST_ELEMENT ( gst_object_ref (element) );
+                  done = TRUE;
+                }
+                g_free(name);
+              }
+              g_value_unset (&value);
+
+              break;
+            case GST_ITERATOR_RESYNC:
+              gst_iterator_resync (it);
+              break;
+            case GST_ITERATOR_ERROR:
+            case GST_ITERATOR_DONE:
+              done = TRUE;
+              break;
+          }
+        }
+        gst_iterator_free (it);
+
+        if (!source){
+            CV_ERROR(CV_StsError, "GStreamer: cannot find appsrc in manual pipeline\n");
+            return false;
+        }
+        pipeline = encodebin;
+    }
+    else
+    {
+        pipeline = gst_pipeline_new (NULL);
+
+        // we just got a filename and a fourcc code.
+        // first, try to guess the container from the filename
+        //encodebin = gst_element_factory_make("encodebin", NULL);
+
+        //proxy old non existing fourcc ids. These were used in previous opencv versions,
+        //but do not even exist in gstreamer any more
+        if (fourcc == CV_FOURCC('M','P','1','V')) fourcc = CV_FOURCC('M', 'P', 'G' ,'1');
+        if (fourcc == CV_FOURCC('M','P','2','V')) fourcc = CV_FOURCC('M', 'P', 'G' ,'2');
+        if (fourcc == CV_FOURCC('D','R','A','C')) fourcc = CV_FOURCC('d', 'r', 'a' ,'c');
+
+
+        //create encoder caps from fourcc
+
+        videocaps = gst_riff_create_video_caps(fourcc, NULL, NULL, NULL, NULL, NULL);
+        if (!videocaps){
+            CV_ERROR( CV_StsUnsupportedFormat, "Gstreamer Opencv backend does not support this codec.");
+        }
+
+        //create container caps from file extension
+        mime = filenameToMimetype(filename);
+        if (!mime) {
+            CV_ERROR( CV_StsUnsupportedFormat, "Gstreamer Opencv backend does not support this file type.");
+        }
+
+        containercaps = gst_caps_from_string(mime);
+
+        //create encodebin profile
+        containerprofile = gst_encoding_container_profile_new("container", "container", containercaps, NULL);
+        videoprofile = gst_encoding_video_profile_new(videocaps, NULL, NULL, 1);
+        gst_encoding_container_profile_add_profile(containerprofile, (GstEncodingProfile *) videoprofile);
+
+        //create pipeline elements
+        encodebin = gst_element_factory_make("encodebin", NULL);
+
+        g_object_set(G_OBJECT(encodebin), "profile", containerprofile, NULL);
+
+        source = gst_element_factory_make("appsrc", NULL);
+        file = gst_element_factory_make("filesink", NULL);
+        g_object_set(G_OBJECT(file), "location", filename, NULL);
+    }
+
+    if (is_color)
+    {
+        input_pix_fmt = GST_VIDEO_FORMAT_BGR;
+        bufsize = frameSize.width * frameSize.height * 3;
+
+        caps = gst_caps_new_simple("video/x-raw",
+                                   "format", G_TYPE_STRING, "BGR",
+                                   "width", G_TYPE_INT, frameSize.width,
+                                   "height", G_TYPE_INT, frameSize.height,
+                                   "framerate", GST_TYPE_FRACTION, int(fps), 1,
+                                   NULL);
+        caps = gst_caps_fixate(caps);
+    }
+    else
+    {
+        input_pix_fmt = GST_VIDEO_FORMAT_GRAY8;
+        bufsize = frameSize.width * frameSize.height;
+
+        caps = gst_caps_new_simple("video/x-raw",
+                                   "format", G_TYPE_STRING, "GRAY8",
+                                   "width", G_TYPE_INT, frameSize.width,
+                                   "height", G_TYPE_INT, frameSize.height,
+                                   "framerate", GST_TYPE_FRACTION, int(fps), 1,
+                                   NULL);
+        caps = gst_caps_fixate(caps);
+    }
+
+    printf ("Writer caps: %s\n", gst_caps_to_string (caps));
+
+
+    gst_app_src_set_caps(GST_APP_SRC(source), caps);
+    gst_app_src_set_stream_type(GST_APP_SRC(source), GST_APP_STREAM_TYPE_STREAM);
+    gst_app_src_set_size (GST_APP_SRC(source), -1);
+
+    g_object_set(G_OBJECT(source), "format", GST_FORMAT_TIME, NULL);
+    g_object_set(G_OBJECT(source), "block", 1, NULL);
+    g_object_set(G_OBJECT(source), "is-live", 0, NULL);
+
+    if(!manualpipeline)
+    {
+        g_object_set(G_OBJECT(file), "buffer-size", bufsize, NULL);
+        gst_bin_add_many(GST_BIN(pipeline), source, encodebin, file, NULL);
+        if(!gst_element_link_many(source, encodebin, file, NULL)) {
+            CV_ERROR(CV_StsError, "GStreamer: cannot link elements\n");
+        }
+    }
+
+    stateret = gst_element_set_state(GST_ELEMENT(pipeline), GST_STATE_PLAYING);
+    if(stateret  == GST_STATE_CHANGE_FAILURE) {
+        handleMessage(pipeline);
+        CV_ERROR(CV_StsError, "GStreamer: cannot put pipeline to play\n");
+    }
+
+    framerate = fps;
+    num_frames = 0;
+
+    handleMessage(pipeline);
+
+    __END__;
+
+    return true;
+}
+
+
+/*!
+ * \brief CvVideoWriter_GStreamer::writeFrame
+ * \param image
+ * \return
+ * Pushes the given frame on the pipeline.
+ * The timestamp for the buffer is generated from the framerate set in open
+ * and ensures a smooth video
+ */
+bool CvVideoWriter_GStreamer::writeFrame( const IplImage * image )
+{
+    CV_FUNCNAME("CvVideoWriter_GStreamer::writerFrame");
+
+    GstClockTime duration, timestamp;
+    GstFlowReturn ret;
+    int size;
+
+    __BEGIN__;
+
+    handleMessage(pipeline);
+
+    if (input_pix_fmt == GST_VIDEO_FORMAT_BGR) {
+        if (image->nChannels != 3 || image->depth != IPL_DEPTH_8U) {
+            CV_ERROR(CV_StsUnsupportedFormat, "cvWriteFrame() needs images with depth = IPL_DEPTH_8U and nChannels = 3.");
+        }
+    }
+    else if (input_pix_fmt == GST_VIDEO_FORMAT_GRAY8) {
+        if (image->nChannels != 1 || image->depth != IPL_DEPTH_8U) {
+            CV_ERROR(CV_StsUnsupportedFormat, "cvWriteFrame() needs images with depth = IPL_DEPTH_8U and nChannels = 1.");
+        }
+    }
+    else {
+        CV_ERROR(CV_StsUnsupportedFormat, "cvWriteFrame() needs BGR or grayscale images\n");
+        return false;
+    }
+
+    size = image->imageSize;
+    duration = ((double)1/framerate) * GST_SECOND;
+    timestamp = num_frames * duration;
+
+    //gst_app_src_push_buffer takes ownership of the buffer, so we need to supply it a copy
+    buffer = gst_buffer_new_allocate (NULL, size, NULL);
+    GstMapInfo info;
+    gst_buffer_map(buffer, &info, (GstMapFlags)GST_MAP_READ);
+    memcpy(info.data, (guint8*)image->imageData, size);
+    gst_buffer_unmap(buffer, &info);
+    GST_BUFFER_DURATION(buffer) = duration;
+    GST_BUFFER_PTS(buffer) = timestamp;
+    GST_BUFFER_DTS(buffer) = timestamp;
+
+    //set the current number in the frame
+    GST_BUFFER_OFFSET(buffer) =  num_frames;
+
+    ret = gst_app_src_push_buffer(GST_APP_SRC(source), buffer);
+    if (ret != GST_FLOW_OK) {
+        CV_WARN("Error pushing buffer to GStreamer pipeline");
+        return false;
+    }
+
+    //GST_DEBUG_BIN_TO_DOT_FILE(GST_BIN(pipeline), GST_DEBUG_GRAPH_SHOW_ALL, "pipeline");
+
+    ++num_frames;
+
+    __END__;
+
+    return true;
+}
+
+/*!
+ * \brief cvCreateVideoWriter_GStreamer
+ * \param filename
+ * \param fourcc
+ * \param fps
+ * \param frameSize
+ * \param isColor
+ * \return
+ * Constructor
+ */
+CvVideoWriter* cvCreateVideoWriter_GStreamer(const char* filename, int fourcc, double fps,
+                                             CvSize frameSize, int isColor )
+{
+    CvVideoWriter_GStreamer* wrt = new CvVideoWriter_GStreamer;
+    if( wrt->open(filename, fourcc, fps,frameSize, isColor))
+        return wrt;
+
+    delete wrt;
+    return 0;
+}
+
+// utility functions
+
+/*!
+ * \brief toFraction
+ * \param decimal
+ * \param numerator
+ * \param denominator
+ * Split a floating point value into numerator and denominator
+ */
+void toFraction(double decimal, double &numerator, double &denominator)
+{
+    double dummy;
+    double whole;
+    decimal = modf (decimal, &whole);
+    for (denominator = 1; denominator<=100; denominator++){
+        if (modf(denominator * decimal, &dummy) < 0.001f)
+            break;
+    }
+    numerator = denominator * decimal;
+}
+
+
+/*!
+ * \brief handleMessage
+ * Handles gstreamer bus messages. Mainly for debugging purposes and ensuring clean shutdown on error
+ */
+void handleMessage(GstElement * pipeline)
+{
+    CV_FUNCNAME("handlemessage");
+
+    GError *err = NULL;
+    gchar *debug = NULL;
+    GstBus* bus = NULL;
+    GstStreamStatusType tp;
+    GstElement * elem = NULL;
+    GstMessage* msg  = NULL;
+
+    __BEGIN__;
+    bus = gst_element_get_bus(pipeline);
+
+    while(gst_bus_have_pending(bus)) {
+        msg = gst_bus_pop(bus);
+
+        //printf("Got %s message\n", GST_MESSAGE_TYPE_NAME(msg));
+
+        if(gst_is_missing_plugin_message(msg))
+        {
+            CV_ERROR(CV_StsError, "GStreamer: your gstreamer installation is missing a required plugin\n");
+        }
+        else
+        {
+            switch (GST_MESSAGE_TYPE (msg)) {
+            case GST_MESSAGE_STATE_CHANGED:
+                GstState oldstate, newstate, pendstate;
+                gst_message_parse_state_changed(msg, &oldstate, &newstate, &pendstate);
+                //fprintf(stderr, "state changed from %s to %s (pending: %s)\n", gst_element_state_get_name(oldstate),
+                //                gst_element_state_get_name(newstate), gst_element_state_get_name(pendstate));
+                break;
+            case GST_MESSAGE_ERROR:
+                gst_message_parse_error(msg, &err, &debug);
+                fprintf(stderr, "GStreamer Plugin: Embedded video playback halted; module %s reported: %s\n",
+                                gst_element_get_name(GST_MESSAGE_SRC (msg)), err->message);
+
+                g_error_free(err);
+                g_free(debug);
+
+                gst_element_set_state(GST_ELEMENT(pipeline), GST_STATE_NULL);
+                break;
+            case GST_MESSAGE_EOS:
+                //fprintf(stderr, "reached the end of the stream.");
+                break;
+            case GST_MESSAGE_STREAM_STATUS:
+                gst_message_parse_stream_status(msg,&tp,&elem);
+                //fprintf(stderr, "stream status: elem %s, %i\n", GST_ELEMENT_NAME(elem), tp);
+                break;
+            default:
+                //fprintf(stderr, "unhandled message %s\n",GST_MESSAGE_TYPE_NAME(msg));
+                break;
+            }
+        }
+        gst_message_unref(msg);
+    }
+
+    gst_object_unref(GST_OBJECT(bus));
+
+    __END__
+}

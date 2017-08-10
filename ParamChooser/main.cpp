@@ -21,58 +21,24 @@ using namespace std;
 shared_ptr<NetworkTable> mNetworkTable; //our networktable for reading/writing
 string netTableAddress = "192.168.1.34"; //address of the rio
 
-/**
- * returns a gstreamer pipeline for reading an image from the camera
- * and saving it to an opencv IplImage object
- * @param vid_device video input to use, if there are multiple cameras
- * @param width width dimension of resolution (must be in allowed dims)
- * @param height height dimension of resolution (must be in allowed dims)
- * @param framerate number of frames per second to grab from the camera
- * @param mjpeg whether or not to use mjpeg compression on the camera hardware 
-        before image grabbed by jetson; could decrease usb bandwith but increase
-        time to decode. If false, grabs raw yuyv image.
- * @return gstreamer pipeling string to feed to CvCapture_GStreamer class
- */
-string createReadPipeline (int vid_device, int width, int height, 
-    int framerate, bool mjpeg);
 
-/**
- * returns a gstreamer pipeline for reading an image from the camera
- * and splitting it into two sinks, one that saves an opencv IplImage and one 
- * that sends the image over the network to a driver-station laptop using h264 
- * encoding
- * @param vid_device video input to use, if there are multiple cameras
- * @param width width dimension of resolution (must be in allowed dims)
- * @param height height dimension of resolution (must be in allowed dims)
- * @param framerate number of frames per second to grab from the camera
- * @param mjpeg whether or not to use mjpeg compression on the camera hardware 
-        before image grabbed by jetson; could decrease usb bandwith but increase
-        time to decode. If false, grabs raw yuyv image.
- * @param bitrate kbit/sec to send over the network
- * @param ip destination ip address of the image
- * @param port destination port of the image
- * @return gstreamer pipeling string to feed to CvCapture_GStreamer class
- */
-string createReadPipelineSplit (int vid_device, int width, int height, 
-    int framerate, bool mjpeg, int bitrate, string ip, int port);
-
-/**
- * returns a gstreamer pipeline for writing an image to the network from an 
- * OpenCV IplImage object
- * @param width width dimension of resolution (must be in allowed dims)
- * @param height height dimension of resolution (must be in allowed dims)
- * @param framerate number of frames per second to send over the network
- * @param bitrate kbit/sec to send over the network
- * @param ip destination ip address of the image
- * @param port destination port of the image
- * @return gstreamer pipeling string to feed to CvVideoWriter_GStreamer class
- */
-string create_write_pipeline (int width, int height, int framerate, 
-    int bitrate, string ip, int port);
-
+//network tables helper functions
+void putNumber (const string &name, const double value);
+void putString (const string &name, const string &value);
+void putBoolean (const string &name, const bool &value);
 
 //useful for testing OpenCV drawing to see you can modify an image
 void fillCircle (cv::Mat img, int rad, cv::Point center);
+
+//network tables helper functions
+void putNumber (const string &name, const double value);
+void putString (const string &name, const string &value);
+void putBoolean (const string &name, const bool &value);
+
+//useful for testing OpenCV drawing to see you can modify an image
+void fillCircle (cv::Mat img, int rad, cv::Point center);
+
+
 void pushToNetworkTables (VisionResultsPackage info);
 
 //camera parameters
@@ -195,6 +161,18 @@ int main () {
     return 0;
 }
 
+void putNumber (const string &name, const double value) {
+    mNetworkTable -> PutNumber (name, value);
+}
+
+void putString (const string &name, const string &value) {
+    mNetworkTable -> PutString (name, value);
+}
+
+void putBoolean (const string &name, const bool &value) {
+    mNetworkTable -> PutBoolean (name, value);
+}
+
 void fillCircle (cv::Mat img, int rad, cv::Point center) {
     int thickness = -1;
     int lineType = 8;
@@ -278,11 +256,11 @@ string create_write_pipeline (int width, int height, int framerate,
 }
 
 void pushToNetworkTables (VisionResultsPackage info) {
-    mNetworkTable -> PutString ("VisionResults", info.createCSVLine());
-    mNetworkTable -> PutString ("VisionResultsHeader", info.createCSVHeader());
-    mNetworkTable -> PutNumber ("Sample Hue", info.sampleHue);
-    mNetworkTable -> PutNumber ("Sample Sat", info.sampleSat);
-    mNetworkTable -> PutNumber ("Sample Val", info.sampleVal);
+    putString ("VisionResults", info.createCSVLine());
+    putString ("VisionResultsHeader", info.createCSVHeader());
+    putNumber ("Sample Hue", info.sampleHue);
+    putNumber ("Sample Sat", info.sampleSat);
+    putNumber ("Sample Val", info.sampleVal);
     mNetworkTable -> Flush();
 }
 

@@ -12,7 +12,7 @@ cv::Scalar GUIDE_DOT(255,255,0);
 cv::Point TEST_POINT(120,120);
 
 //utility functions
-void CopyPointData (const cv::Point &pSource, cv::Point &pTarget) {
+void copyPointData (const cv::Point &pSource, cv::Point &pTarget) {
     pTarget.x = pSource.x;
     pTarget.y = pSource.y;
 }
@@ -29,7 +29,7 @@ inline int getVal (cv::Mat &img, int r, int c) {
     return img.at<cv::Vec3b>(r, c)[2];
 }
 
-void draw_point (cv::Mat &img, cv::Point &p, cv::Scalar &color) {
+void drawPoint (cv::Mat &img, cv::Point &p, cv::Scalar &color) {
     cv::circle(img, p, 4, color, 4);
 }
 
@@ -65,8 +65,6 @@ bool is_valid (contour_type &contour) {
     return valid;
 }
 
-VisionResultsPackage processingFailurePackage(ui64 time);
-
 VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage){
     ui64 time_began = millis_since_epoch();
     //blur the image
@@ -89,7 +87,10 @@ VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage){
 
     processedImage = greenThreshed.clone();
     cv::threshold (processedImage, processedImage, 0, 255, cv::THRESH_BINARY);
-    cv::cvtColor(processedImage, processedImage, CV_GRAY2BGR);   
+    cv::cvtColor(processedImage, processedImage, CV_GRAY2BGR); 
+    //processedImage = bgr.clone();  
+
+    drawPoint (processedImage, TEST_POINT, GUIDE_DOT);
 
     //contour detection
     vector<contour_type> contours;
@@ -182,11 +183,11 @@ VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage){
     res.timestamp = time_began;
     res.valid = true;
     
-    CopyPointData (ul, res.ul);
-    CopyPointData (ur, res.ur);
-    CopyPointData (ll, res.ll);
-    CopyPointData (lr, res.lr);
-    CopyPointData (center, res.midPoint);
+    copyPointData (ul, res.ul);
+    copyPointData (ur, res.ur);
+    copyPointData (ll, res.ll);
+    copyPointData (lr, res.lr);
+    copyPointData (center, res.midPoint);
 
     res.upperWidth = top_width;
     res.lowerWidth = bottom_width;
@@ -196,20 +197,18 @@ VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage){
     res.sampleHue = hue;
     res.sampleSat = sat;
     res.sampleVal = val;
+
+    drawOnImage (processedImage, res);
     return res;
 }
 
 void drawOnImage (cv::Mat &img, VisionResultsPackage info) {
     //draw the 4 corners on the image
-    draw_point (img, info.ul, MY_BLUE);
-    draw_point (img, info.ur, MY_RED);
-    draw_point (img, info.ll, MY_BLUE);
-    draw_point (img, info.lr, MY_RED);
-    draw_point (img, TEST_POINT, GUIDE_DOT);
-
-    //draw the center of mass and the contour itself
-    draw_point (img, info.midPoint, MY_PURPLE);
-
+    drawPoint (img, info.ul, MY_BLUE);
+    drawPoint (img, info.ur, MY_RED);
+    drawPoint (img, info.ll, MY_BLUE);
+    drawPoint (img, info.lr, MY_RED);
+    drawPoint (img, info.midPoint, MY_PURPLE);
 }
 
 VisionResultsPackage processingFailurePackage(ui64 time) {
@@ -217,11 +216,11 @@ VisionResultsPackage processingFailurePackage(ui64 time) {
     failureResult.timestamp = time;
     failureResult.valid = false;
     
-    CopyPointData (cv::Point (-1, -1), failureResult.ul);
-    CopyPointData (cv::Point (-1, -1), failureResult.ur);
-    CopyPointData (cv::Point (-1, -1), failureResult.ll);
-    CopyPointData (cv::Point (-1, -1), failureResult.lr);
-    CopyPointData (cv::Point (-1, -1), failureResult.midPoint);
+    copyPointData (cv::Point (-1, -1), failureResult.ul);
+    copyPointData (cv::Point (-1, -1), failureResult.ur);
+    copyPointData (cv::Point (-1, -1), failureResult.ll);
+    copyPointData (cv::Point (-1, -1), failureResult.lr);
+    copyPointData (cv::Point (-1, -1), failureResult.midPoint);
 
     failureResult.upperWidth = -1;
     failureResult.lowerWidth = -1;
