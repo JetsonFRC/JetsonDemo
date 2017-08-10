@@ -1,45 +1,13 @@
-#include <stdio.h>
-#include <string>
-#include <iostream>
-#include <opencv2/highgui/highgui.hpp>
-#include <opencv2/imgproc/imgproc.hpp>
-#include <opencv2/opencv.hpp>
-
-#include "cap_gstreamer.hpp"
-
-#include <time.h>
-#include <sys/time.h>
-
-#include "vision.hpp"
-#include "networktables/NetworkTable.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
+#include "helper.hpp"
+#include "cam_helper.hpp"
+#include "gst_pipeline.hpp"
+#include "color.hpp"
+#include "cam_helper.hpp"
 
 using namespace std;
 
-shared_ptr<NetworkTable> mNetworkTable; //our networktable for reading/writing
+shared_ptr<NetworkTable> myNetworkTable; //our networktable for reading/writing
 string netTableAddress = "192.168.1.34"; //address of the rio
-
-
-//network tables helper functions
-void putNumber (const string &name, const double value);
-void putString (const string &name, const string &value);
-void putBoolean (const string &name, const bool &value);
-
-//useful for testing OpenCV drawing to see you can modify an image
-void fillCircle (cv::Mat img, int rad, cv::Point center);
-
-//network tables helper functions
-void putNumber (const string &name, const double value);
-void putString (const string &name, const string &value);
-void putBoolean (const string &name, const bool &value);
-
-//useful for testing OpenCV drawing to see you can modify an image
-void fillCircle (cv::Mat img, int rad, cv::Point center);
-
-
-void pushToNetworkTables (VisionResultsPackage info);
 
 //camera parameters
 int 
@@ -57,40 +25,48 @@ port_thresh = 5805; //destination port for thresholded image
 string ip = "192.168.1.34"; //destination ip
 
 string tableName = "CVResultsTable";
-
 bool verbose = true;
 
-void flash_good_settings() {
-    char setting_script[100];
-    sprintf (setting_script, "bash camera_settings.sh %d", device);
-    system (setting_script);
+namespace params {
+    int test_x = 50, test_y = 50;
+    int min_hue = 0, max_hue = 255;
+    int min_sat = 0, max_sat = 255;
+    int min_val = 0, max_val = 255;
+    int blur = 5;
 }
 
-void flash_bad_settings() {
-    char setting_script[100];
-    sprintf (setting_script, "bash bad_settings.sh %d", device);
-    system (setting_script);
-}
+CameraSettings cam_settings;
 
-int main () {
-    //call the bash script to set camera settings
-    flash_good_settings();
+struct ImgResults {
+    int hue, sat, val;
+};
 
-    //initialize NetworkTables
+ImgResults simple_pipeline (const cv::Mat &bgr, cv::Mat &processedImage);
+void send_initial_img_params ();
+void update_img_params ();
+void set_cam_params ();
+void update_camera_params ();
+
+void init_networktables () {
     NetworkTable::SetClientMode();
     NetworkTable::SetDSClientEnabled(false);
     NetworkTable::SetIPAddress(llvm::StringRef(netTableAddress));
     NetworkTable::Initialize();
     if (verbose) printf ("Initialized table\n");
-    mNetworkTable = NetworkTable::GetTable(tableName);
+    myNetworkTable = NetworkTable::GetTable(tableName);
+}
+
+int main () {
+    init_networktables();
+
+    send_initial_img_params ();
+    set_cam_params();
 
     //open camera using CvCapture_GStreamer class
     CvCapture_GStreamer mycam;
     string read_pipeline = createReadPipelineSplit (
             device, width, height, framerate, mjpeg, 
             bitrate, ip, port_stream);
-    // string read_pipeline = createReadPipeline (
-    //         device, width, height, framerate, mjpeg);
     if (verbose) {
         printf ("GStreamer read pipeline: %s\n", read_pipeline.c_str()); 
     }
@@ -114,41 +90,28 @@ int main () {
     //initialize raw & processed image matrices
     cv::Mat cameraFrame, processedImage;
 
-    if (verbose) {
-        printf ("Data header:\n%s", 
-            VisionResultsPackage::createCSVHeader().c_str());
-    }
-
     //take each frame from the pipeline
     for (long long frame = 0; ; frame++) {
-        if (frame < 10) {
-            flash_bad_settings();
-        }
-        else if (frame == 50) {
-            flash_good_settings();
-        }
+        update_img_params();
+        update_camera_params();
 
         bool success = mycam.grabFrame();
-
         if (verbose) printf ("frame #%lld\n", frame);
 
         if (success) {
+            //printf ("TEST X, TEST Y: %d, %d\n", params::test_x, params::test_y);
+
             IplImage *img = mycam.retrieveFrame(0); //store frame in IplImage
             cameraFrame = cv::cvarrToMat (img); //convert IplImage to cv::Mat
-            processedImage = cameraFrame;
-                
-            //process the image, put the information into network tables
-            VisionResultsPackage info = calculate(cameraFrame, processedImage);
+            processedImage = cameraFrame; 
+    
+            ImgResults res = simple_pipeline (cameraFrame, processedImage);
+            myNetworkTable -> PutNumber ("TEST_HUE", res.hue);
+            myNetworkTable -> PutNumber ("TEST_SAT", res.sat);
+            myNetworkTable -> PutNumber ("TEST_VAL", res.val);
 
-            pushToNetworkTables (info);
-          
             //pass the results back out
             IplImage outImage = (IplImage) processedImage;
-            printf ("results string: %s\n", info.createCSVLine().c_str());
-            if (verbose) {
-                printf ("Out image stats: (depth %d), (nchannels %d)\n", 
-                    outImage.depth, outImage.nChannels);
-            }
             mywriter.writeFrame (&outImage); //write output image over network
         }
 
@@ -161,106 +124,105 @@ int main () {
     return 0;
 }
 
-void putNumber (const string &name, const double value) {
-    mNetworkTable -> PutNumber (name, value);
+
+ImgResults simple_pipeline (const cv::Mat &bgr, cv::Mat &processedImage) {
+
+    //blur the image
+    cv::Point testPoint (params::test_x, params::test_y);
+    cv::blur(bgr, bgr, cv::Size(params::blur, params::blur));
+    cv::Mat hsvMat;
+    //convert to hsv
+    cv::cvtColor(bgr, hsvMat, cv::COLOR_BGR2HSV);
+
+    //store HSV values at a given test point to send back
+    int hue = getHue(hsvMat, testPoint.x, testPoint.y);
+    int sat = getSat(hsvMat, testPoint.x, testPoint.y);
+    int val = getVal(hsvMat, testPoint.x, testPoint.y);
+
+    //threshold on green (light ring color)
+    cv::Mat greenThreshed;
+    cv::inRange(hsvMat,
+                cv::Scalar(params::min_hue, params::min_sat, params::min_val),
+                cv::Scalar(params::max_hue, params::max_sat, params::max_val),
+                greenThreshed);
+
+    processedImage = greenThreshed.clone();
+    cv::threshold (processedImage, processedImage, 0, 255, cv::THRESH_BINARY);
+    cv::cvtColor (processedImage, processedImage, CV_GRAY2BGR); 
+    //processedImage = bgr.clone();  
+
+    drawPoint (processedImage, testPoint, PURPLE);
+
+    ImgResults res;
+    res.hue = hue;
+    res.sat = sat;
+    res.val = val;
+
+    return res;
 }
 
-void putString (const string &name, const string &value) {
-    mNetworkTable -> PutString (name, value);
+void send_initial_img_params () {
+    myNetworkTable -> PutNumber ("PARAM_TEST_X", params::test_x);
+    myNetworkTable -> PutNumber ("PARAM_TEST_Y", params::test_y);
+    myNetworkTable -> PutNumber ("PARAM_MIN_HUE", params::min_hue);
+    myNetworkTable -> PutNumber ("PARAM_MAX_HUE", params::max_hue);
+    myNetworkTable -> PutNumber ("PARAM_MIN_SAT", params::min_sat);
+    myNetworkTable -> PutNumber ("PARAM_MAX_SAT", params::max_sat);
+    myNetworkTable -> PutNumber ("PARAM_MIN_VAL", params::min_val);
+    myNetworkTable -> PutNumber ("PARAM_MAX_VAL", params::max_val);
+    myNetworkTable -> PutNumber ("PARAM_BLUR", params::blur);
 }
 
-void putBoolean (const string &name, const bool &value) {
-    mNetworkTable -> PutBoolean (name, value);
+void update_img_params () {
+    params::test_x = myNetworkTable -> GetNumber ("PARAM_TEST_X", params::test_x);
+    params::test_y = myNetworkTable -> GetNumber ("PARAM_TEST_Y", params::test_y);
+    params::min_hue = myNetworkTable -> GetNumber ("PARAM_MIN_HUE", params::min_hue);
+    params::max_hue = myNetworkTable -> GetNumber ("PARAM_MAX_HUE", params::max_hue);
+    params::min_sat = myNetworkTable -> GetNumber ("PARAM_MIN_SAT", params::min_sat);
+    params::max_sat = myNetworkTable -> GetNumber ("PARAM_MAX_SAT", params::max_sat);
+    params::min_val = myNetworkTable -> GetNumber ("PARAM_MIN_VAL", params::min_val);
+    params::max_val = myNetworkTable -> GetNumber ("PARAM_MAX_VAL", params::max_val);
+    params::blur = myNetworkTable -> GetNumber ("PARAM_BLUR", params::blur);
 }
 
-void fillCircle (cv::Mat img, int rad, cv::Point center) {
-    int thickness = -1;
-    int lineType = 8;
-    cv::circle (img, center, rad, cv::Scalar(0, 0, 255), thickness, lineType);
+void push_settings_to_network (CameraSettings settings) {
+    myNetworkTable -> PutNumber ("CAM_brightness", settings.brightness);
+    myNetworkTable -> PutNumber ("CAM_contrast", settings.contrast);
+    myNetworkTable -> PutNumber ("CAM_saturation", settings.saturation);
+    myNetworkTable -> PutNumber ("CAM_white_balance_temperature_auto", settings.white_balance_temperature_auto);
+    myNetworkTable -> PutNumber ("CAM_white_balance_temperature", settings.white_balance_temperature);
+    myNetworkTable -> PutNumber ("CAM_power_line_frequency", settings.power_line_frequency);
+    myNetworkTable -> PutNumber ("CAM_sharpness", settings.sharpness);
+    myNetworkTable -> PutNumber ("CAM_backlight_compensation", settings.backlight_compensation);
+    myNetworkTable -> PutNumber ("CAM_exposure_auto", settings.exposure_auto);
+    myNetworkTable -> PutNumber ("CAM_exposure_absolute", settings.exposure_absolute);
 }
 
-string createReadPipeline (int vid_device, int width, int height, 
-    int framerate, bool mjpeg) {
+CameraSettings grab_settings_from_network () {
+    CameraSettings result;
+    result.brightness = myNetworkTable -> GetNumber ("CAM_brightness", cam_settings.brightness);
+    result.contrast = myNetworkTable -> GetNumber ("CAM_contrast", cam_settings.contrast);
+    result.saturation = myNetworkTable -> GetNumber ("CAM_saturation", cam_settings.saturation);
+    result.white_balance_temperature_auto = myNetworkTable -> GetNumber ("CAM_white_balance_temperature_auto", cam_settings.white_balance_temperature_auto);
+    result.white_balance_temperature = myNetworkTable -> GetNumber ("CAM_white_balance_temperature", cam_settings.white_balance_temperature);
+    result.power_line_frequency = myNetworkTable -> GetNumber ("CAM_power_line_frequency", cam_settings.power_line_frequency);
+    result.sharpness = myNetworkTable -> GetNumber ("CAM_sharpness", cam_settings.sharpness);
+    result.backlight_compensation = myNetworkTable -> GetNumber ("CAM_backlight_compensation", cam_settings.backlight_compensation);
+    result.exposure_auto = myNetworkTable -> GetNumber ("CAM_exposure_auto", cam_settings.exposure_auto);
+    result.exposure_absolute = myNetworkTable -> GetNumber ("CAM_exposure_absolute", cam_settings.exposure_absolute);
+    return result;
+}
 
-    char buff[500];
-    if (mjpeg) {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "image/jpeg,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! "
-            "jpegdec ! autovideoconvert ! appsink",
-            vid_device, width, height, framerate);
-    } 
-    else {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "video/x-raw,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! "
-            "autovideoconvert ! appsink",
-            vid_device, width, height, framerate);
+void set_cam_params () {
+    flash_settings (device, cam_settings);
+    push_settings_to_network (cam_settings);
+}
+
+void update_camera_params () {
+    CameraSettings new_settings = grab_settings_from_network();
+    if (new_settings != cam_settings) {
+        cam_settings = new_settings;
+        set_cam_params();
     }
-
-    string pipstring = buff;
-    printf ("read string: %s\n", pipstring.c_str());
-    return pipstring;
-}
-
-string createReadPipelineSplit (
-    int vid_device, int width, int height, int framerate, bool mjpeg,
-    int bitrate, string ip, int port) {
-
-    char buff[500];
-    if (mjpeg) {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "image/jpeg,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! jpegdec ! "
-            "tee name=split "
-                "split. ! queue ! videoconvert ! omxh264enc bitrate=%d ! "
-                    "video/x-h264, stream-format=(string)byte-stream ! h264parse ! "
-                    "rtph264pay ! udpsink host=%s port=%d "
-                "split. ! queue ! autovideoconvert ! appsink",
-            //"appsink",
-            vid_device, width, height, framerate, bitrate, ip.c_str(), port);
-    } 
-    else {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "video/x-raw,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! "
-            "tee name=split "
-                "split. ! queue ! videoconvert ! omxh264enc bitrate=%d ! "
-                    "video/x-h264, stream-format=(string)byte-stream ! h264parse ! "
-                    "rtph264pay ! udpsink host=%s port=%d "
-                "split. ! queue ! autovideoconvert ! appsink",
-            //"appsink",
-            vid_device, width, height, framerate, bitrate, ip.c_str(), port);
-    }
-
-    string pipstring = buff;
-    printf ("read string: %s\n", pipstring.c_str());
-    return pipstring;
-}
-
-string create_write_pipeline (int width, int height, int framerate, 
-    int bitrate, string ip, int port) {
-
-    char buff[500];
-    sprintf (buff,
-        "appsrc ! "
-        "video/x-raw, format=(string)BGR, width=(int)%d, height=(int)%d, framerate=(fraction)%d/1 ! "
-        "videoconvert ! omxh264enc bitrate=%d ! video/x-h264, stream-format=(string)byte-stream ! h264parse ! rtph264pay ! "
-        "udpsink host=%s port=%d",
-        width, height, framerate, bitrate, ip.c_str(), port);
-
-     string pipstring = buff;
-    
-    printf ("write string: %s\n", pipstring.c_str());
-    return pipstring;
-}
-
-void pushToNetworkTables (VisionResultsPackage info) {
-    putString ("VisionResults", info.createCSVLine());
-    putString ("VisionResultsHeader", info.createCSVHeader());
-    putNumber ("Sample Hue", info.sampleHue);
-    putNumber ("Sample Sat", info.sampleSat);
-    putNumber ("Sample Val", info.sampleVal);
-    mNetworkTable -> Flush();
 }
 

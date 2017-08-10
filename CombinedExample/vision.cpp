@@ -74,9 +74,9 @@ VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage){
     cv::cvtColor(bgr, hsvMat, cv::COLOR_BGR2HSV);
 
     //store HSV values at a given test point to send back
-    int hue = getHue(hsvMat, TEST_POINT.x,TEST_POINT.y);
-    int sat = getSat(hsvMat, TEST_POINT.x,TEST_POINT.y);
-    int val = getVal(hsvMat, TEST_POINT.x,TEST_POINT.y);
+    int hue = getHue(hsvMat, TEST_POINT.x, TEST_POINT.y);
+    int sat = getSat(hsvMat, TEST_POINT.x, TEST_POINT.y);
+    int val = getVal(hsvMat, TEST_POINT.x, TEST_POINT.y);
 
     //threshold on green (light ring color)
     cv::Mat greenThreshed;

@@ -18,7 +18,7 @@
 
 using namespace std;
 
-shared_ptr<NetworkTable> mNetworkTable; //our networktable for reading/writing
+shared_ptr<NetworkTable> myNetworkTable; //our networktable for reading/writing
 string netTableAddress = "192.168.1.34"; //address of the rio
 
 /**
@@ -116,7 +116,7 @@ int main () {
     NetworkTable::SetIPAddress(llvm::StringRef(netTableAddress));
     NetworkTable::Initialize();
     if (verbose) printf ("Initialized table\n");
-    mNetworkTable = NetworkTable::GetTable(tableName);
+    myNetworkTable = NetworkTable::GetTable(tableName);
 
     //open camera using CvCapture_GStreamer class
     CvCapture_GStreamer mycam;
@@ -278,11 +278,11 @@ string create_write_pipeline (int width, int height, int framerate,
 }
 
 void pushToNetworkTables (VisionResultsPackage info) {
-    mNetworkTable -> PutString ("VisionResults", info.createCSVLine());
-    mNetworkTable -> PutString ("VisionResultsHeader", info.createCSVHeader());
-    mNetworkTable -> PutNumber ("Sample Hue", info.sampleHue);
-    mNetworkTable -> PutNumber ("Sample Sat", info.sampleSat);
-    mNetworkTable -> PutNumber ("Sample Val", info.sampleVal);
-    mNetworkTable -> Flush();
+    myNetworkTable -> PutString ("VisionResults", info.createCSVLine());
+    myNetworkTable -> PutString ("VisionResultsHeader", info.createCSVHeader());
+    myNetworkTable -> PutNumber ("Sample Hue", info.sampleHue);
+    myNetworkTable -> PutNumber ("Sample Sat", info.sampleSat);
+    myNetworkTable -> PutNumber ("Sample Val", info.sampleVal);
+    myNetworkTable -> Flush();
 }
 
