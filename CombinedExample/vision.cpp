@@ -1,6 +1,4 @@
 #include "vision.hpp"
-#include "helper.hpp"
-#include <iostream>
 using namespace std;
 
 
@@ -11,9 +9,10 @@ cv::Scalar MY_BLUE (255, 0, 0);
 cv::Scalar MY_GREEN (0, 255, 0);
 cv::Scalar MY_PURPLE (255, 0, 255);
 cv::Scalar GUIDE_DOT(255,255,0);
+cv::Point TEST_POINT(120,120);
 
 //utility functions
-void CopyPointData (const cv::Point &pSource, cv::Point2d &pTarget) {
+void CopyPointData (const cv::Point &pSource, cv::Point &pTarget) {
     pTarget.x = pSource.x;
     pTarget.y = pSource.y;
 }
@@ -66,8 +65,9 @@ bool is_valid (contour_type &contour) {
     return valid;
 }
 
+VisionResultsPackage processingFailurePackage(ui64 time);
 
-VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
+VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage){
     ui64 time_began = millis_since_epoch();
     //blur the image
     cv::blur(bgr, bgr, cv::Size(5,5));
@@ -76,30 +76,34 @@ VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
     cv::cvtColor(bgr, hsvMat, cv::COLOR_BGR2HSV);
 
     //store HSV values at a given test point to send back
-    cv::Point testPoint(120,120);
-    int hue = getHue(hsvMat, testPoint.x,testPoint.y);
-    int sat = getSat(hsvMat, testPoint.x,testPoint.y);
-    int val = getVal(hsvMat, testPoint.x,testPoint.y);
+    int hue = getHue(hsvMat, TEST_POINT.x,TEST_POINT.y);
+    int sat = getSat(hsvMat, TEST_POINT.x,TEST_POINT.y);
+    int val = getVal(hsvMat, TEST_POINT.x,TEST_POINT.y);
 
     //threshold on green (light ring color)
+    cv::Mat greenThreshed;
     cv::inRange(hsvMat,
                 cv::Scalar(MIN_HUE, MIN_SAT, MIN_VAL),
                 cv::Scalar(MAX_HUE, MAX_SAT, MAX_VAL),
-                processedImage);
+                greenThreshed);
+
+    processedImage = greenThreshed.clone();
+    cv::threshold (processedImage, processedImage, 0, 255, cv::THRESH_BINARY);
+    cv::cvtColor(processedImage, processedImage, CV_GRAY2BGR);   
 
     //contour detection
     vector<contour_type> contours;
     vector<cv::Vec4i> hierarchy; //throwaway, needed for function
     try {
-        cv::findContours (processedImage, contours, hierarchy, 
+        cv::findContours (greenThreshed, contours, hierarchy, 
             cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
     }
     catch (...) { //TODO: change this to the error that occurs when there are no contours
-        return processingFailurePackage();
+        return processingFailurePackage(time_began);
     }
 
     if (contours.size() < 1) { //definitely did not find 
-        return processingFailurePackage();
+        return processingFailurePackage(time_began);
     }
     
     //store the convex hulls of any valid contours
@@ -117,7 +121,7 @@ VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
     printf ("Num contours: %d\n", numContours);
     
     if (numContours < 1) { //definitely did not find 
-        return processingFailurePackage();
+        return processingFailurePackage(time_began);
     }
 
     //find the largest contour in the image
@@ -156,23 +160,7 @@ VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
         if (dif > ur.x - ur.y) {
             ur = all_points[i];
         }
-    }
-
-    cv::threshold (processedImage, processedImage, 0, 255, cv::THRESH_BINARY);
-    cv::cvtColor(processedImage, processedImage, CV_GRAY2BGR);
-
-    //draw the 4 corners on the image
-    draw_point (bgr, ul, MY_BLUE);
-    draw_point (bgr, ur, MY_RED);
-    draw_point (bgr, ll, MY_BLUE);
-    draw_point (bgr, lr, MY_RED);
-    draw_point (bgr, testPoint, GUIDE_DOT);
-
-    draw_point (processedImage, ul, MY_BLUE);
-    draw_point (processedImage, ur, MY_RED);
-    draw_point (processedImage, ll, MY_BLUE);
-    draw_point (processedImage, lr, MY_RED);
-    draw_point (processedImage, testPoint, GUIDE_DOT);
+    } 
 
     //find the center of mass of the largest contour
     cv::Moments centerMass = cv::moments(largest, true);
@@ -180,9 +168,6 @@ VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
     double centerY = (centerMass.m01) / (centerMass.m00);
     cv::Point center (centerX, centerY);
 
-    //draw the center of mass and the contour itself
-    draw_point (bgr, center, MY_PURPLE);
-    draw_point (processedImage, center, MY_PURPLE);
     vector<contour_type> largestArr;
     largestArr.push_back(largest);
     cv::drawContours(processedImage, largestArr , 0, MY_GREEN, 2);
@@ -195,6 +180,7 @@ VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
     //create the results package
     VisionResultsPackage res;
     res.timestamp = time_began;
+    res.valid = true;
     
     CopyPointData (ul, res.ul);
     CopyPointData (ur, res.ur);
@@ -211,4 +197,40 @@ VisionResultsPackage calculate(cv::Mat &bgr, cv::Mat &processedImage){
     res.sampleSat = sat;
     res.sampleVal = val;
     return res;
+}
+
+void drawOnImage (cv::Mat &img, VisionResultsPackage info) {
+    //draw the 4 corners on the image
+    draw_point (img, info.ul, MY_BLUE);
+    draw_point (img, info.ur, MY_RED);
+    draw_point (img, info.ll, MY_BLUE);
+    draw_point (img, info.lr, MY_RED);
+    draw_point (img, TEST_POINT, GUIDE_DOT);
+
+    //draw the center of mass and the contour itself
+    draw_point (img, info.midPoint, MY_PURPLE);
+
+}
+
+VisionResultsPackage processingFailurePackage(ui64 time) {
+    VisionResultsPackage failureResult;
+    failureResult.timestamp = time;
+    failureResult.valid = false;
+    
+    CopyPointData (cv::Point (-1, -1), failureResult.ul);
+    CopyPointData (cv::Point (-1, -1), failureResult.ur);
+    CopyPointData (cv::Point (-1, -1), failureResult.ll);
+    CopyPointData (cv::Point (-1, -1), failureResult.lr);
+    CopyPointData (cv::Point (-1, -1), failureResult.midPoint);
+
+    failureResult.upperWidth = -1;
+    failureResult.lowerWidth = -1;
+    failureResult.leftHeight = -1;
+    failureResult.rightHeight = -1;
+
+    failureResult.sampleHue = -1;
+    failureResult.sampleSat = -1;
+    failureResult.sampleVal = -1;
+
+    return failureResult;
 }

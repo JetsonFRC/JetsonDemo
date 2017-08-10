@@ -3,11 +3,10 @@
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
-
 #include <vector>
 #include <iostream>
-
 #include <utility>
+#include "helper.hpp"
 
 using namespace std;
 
@@ -46,6 +45,7 @@ struct VisionResultsPackage {
         ss << upperWidth << "," << lowerWidth << ",";
         ss << leftHeight << "," << rightHeight << ",";
         ss << sampleHue << "," << sampleSat << "," << sampleVal;
+        return ss.str();
     }
 };
 
@@ -72,6 +72,6 @@ MIN_AREA_RAT = 0.85, MAX_AREA_RAT = 100; //cvxhull area / contour area
  * @param processedImage results of OpenCV image pipeline
  * @return results of vision processing (e.g location of target, timestamp)
  */ 
-VisionResultsPackage calculate(constcv::Mat &bgr, cv::Mat &processedImage);
+VisionResultsPackage calculate(const cv::Mat &bgr, cv::Mat &processedImage);
 
 #endif

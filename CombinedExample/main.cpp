@@ -85,8 +85,6 @@ string create_write_pipeline (int width, int height, int framerate,
     int bitrate, string ip, int port);
 
 void pushToNetworkTables (VisionResultsPackage info);
-void logString (VisionResultsPackage info);
-
 
 //camera parameters
 int 
@@ -123,9 +121,11 @@ int main () {
 
     //open camera using CvCapture_GStreamer class
     CvCapture_GStreamer mycam;
-    string read_pipeline = create_read_pipeline_split (
-            device, width, height, framerate, mjpeg, 
-            bitrate, ip, port_stream);
+    // string read_pipeline = create_read_pipeline_split (
+    //         device, width, height, framerate, mjpeg, 
+    //         bitrate, ip, port_stream);
+    string read_pipeline = create_read_pipeline (
+            device, width, height, framerate, mjpeg);
     if (verbose) {
         printf ("GStreamer read pipeline: %s\n", read_pipeline.c_str()); 
     }
@@ -169,11 +169,10 @@ int main () {
             VisionResultsPackage info = calculate(cameraFrame, processedImage);
 
             pushToNetworkTables (info);
-            createLogString (info);
           
             //pass the results back out
             IplImage outImage = (IplImage) processedImage;
-
+            printf ("results string: %s\n", info.createCSVLine().c_str());
             if (verbose) {
                 printf ("Out image stats: (depth %d), (nchannels %d)\n", 
                     outImage.depth, outImage.nChannels);
@@ -249,7 +248,7 @@ string create_read_pipeline_split (
             "image/jpeg,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! jpegdec ! "
             "tee name=split "
                 "split. ! queue ! videoconvert ! omxh264enc bitrate=%d ! "
-                    "video/x-h264, stream-format=(string)byte-stream !    h264parse ! "
+                    "video/x-h264, stream-format=(string)byte-stream ! h264parse ! "
                     "rtph264pay ! udpsink host=%s port=%d "
                 "split. ! queue ! autovideoconvert ! appsink",
             //"appsink",
@@ -291,28 +290,8 @@ string create_write_pipeline (int width, int height, int framerate,
 }
 
 void pushToNetworkTables (VisionResultsPackage info) {
-    putNumber("Hue", info.hsv[0]);
-    putNumber("Saturation", info.hsv[1]);
-    putNumber("Value", info.hsv[2]);
-    putNumber("CenterX", info.midPoint.x);
-    putNumber("CenterY", info.midPoint.y);
-    putNumber("TopWidth", info.widths[0]);
-    putNumber("BottomWidth", info.widths[1]);
-    putNumber("LeftHeight", info.heights[0]);
-    putNumber("RightHeight", info.heights[1]);
-    putNumber("Frame#", frame);
-    putNumber("UpperLeftX", ul.x);
-    putNumber("UpperLeftY", ul.y);
-    putNumber("UpperRightX", ur.x);
-    putNumber("UpperRightY", ur.y);
-    putNumber("LowerLeftX", ll.x);
-    putNumber("LowerLeftY", ll.y);
-    putNumber("LowerRightX", lr.x);
-    putNumber("LowerRightY", lr.y);
+    putString ("VisionResults", info.createCSVLine());
+    putString ("VisionResultsHeader", info.createCSVHeader());
     mNetworkTable -> Flush();
-}
-
-void logString (VisionResultsPackage info) {
-
 }
 

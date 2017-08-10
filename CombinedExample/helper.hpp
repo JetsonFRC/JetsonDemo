@@ -2,7 +2,8 @@
 #define HELPER_HPP
 
 #include <iostream>
-#include <stdio>
+#include <stdio.h>
+#include <chrono>
 
 using namespace std;
 using namespace std::chrono;
@@ -12,7 +13,9 @@ typedef long long i64;
 
 
 extern inline ui64 millis_since_epoch() {
-    return (ui64) (time_point_cast<microseconds>(system_clock::now()));
+    ui64 time = (time_point_cast<milliseconds>
+        (system_clock::now()).time_since_epoch()).count();
+    return time;
 }
 
 #endif
