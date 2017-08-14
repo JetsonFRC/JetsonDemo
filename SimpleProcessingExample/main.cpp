@@ -3,13 +3,17 @@
 #include "helper.hpp"
 
 using namespace std;
-
+using namespace JetsonCV;
 const double
 	MIN_AREA = 0.001, MAX_AREA = 1000000,
 	MIN_WIDTH = 0, MAX_WIDTH = 100000, //rectangle width
 	MIN_HEIGHT = 0, MAX_HEIGHT = 100000, //rectangle height
 	MIN_RECT_RAT = 1.5, MAX_RECT_RAT = 8, //rect height / rect width
 	MIN_AREA_RAT = 0.85, MAX_AREA_RAT = 100; //convex hull area / contour area, this can probably be more aggressive
+const int RES_X = 320, RES_Y = 240;
+const int MIN_HUE = 55, MAX_HUE = 65;
+const int MIN_SAT = 0, MAX_SAT = 255;
+const int MIN_VAL = 50, MAX_VAL = 255;
 
 int device = 0;
 int width = 320;
@@ -23,8 +27,9 @@ int port = 5805;
 string ip = "192.168.1.34";
 
 shared_ptr<NetworkTable> mNetworkTable;
+typedef std::vector<cv::Point> contour_type;
 
-void startNetworkTables(shared_ptr<NetworkTable> pNetworkTable, string tableName){
+void startNetworkTables(shared_ptr<NetworkTable>& pNetworkTable, string tableName){
 	NetworkTable::SetClientMode();
     NetworkTable::SetDSClientEnabled(false);
     NetworkTable::SetIPAddress(llvm::StringRef(ip));
@@ -65,6 +70,7 @@ bool is_valid (contour_type &contour) {
 
 void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 	//blur first
+
 	cv::blur(bgr, bgr, cv::Size(5,5));
 	cv::Mat hsvMat;
 	//convert to hsv
@@ -79,7 +85,7 @@ void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 	vector<contour_type> contours;
 	vector<cv::Vec4i> hierarchy; //throwaway, needed for function
 	cv::findContours( greenMat, contours, hierarchy, cv::RETR_TREE, cv::CHAIN_APPROX_SIMPLE);
-	
+
 	//store the convex hulls of any valid contours
 	vector<contour_type> valid_contour_hulls;
 	for (int i = 0; i < (int)contours.size(); i++) {
@@ -104,7 +110,6 @@ void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 			largest = valid_contour_hulls[i];
 		}
 	}
-
 	results.put("Largest Contour Area", largestArea);
 
 	//get the points of corners
@@ -133,27 +138,23 @@ void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 			ur = all_points[i];
 		}
 	}
-
 	//find the center of mass of the largest contour
-	cv::Moments centerMass = cv::moments(largest, true);
+	/*cv::Moments centerMass = cv::moments(largest, true);
 	double centerX = (centerMass.m10)/(centerMass.m00);
-	double centerY = (centerMass.m01)/(centerMass.m00);
-	cv::Point center(centerX,centerY);
-
+	double centerY = (centerMass.m01)/(centerMass.m00);*/
+	
 	double top_width = ur.x - ul.x;
 	double bottom_width = lr.x - ll.x;
 	double left_height = ll.y - ul.y;
 	double right_height = lr.y - ur.y;
 
-	results.put("Center X", centerX);
-	results.put("Center Y", centerY);
+	//results.put("Center X", centerX);
+	//results.put("Center Y", centerY);
 	results.put("Top Width", top_width);
 	results.put("Bottom Width", bottom_width);
 	results.put("Left Height", left_height);
 	results.put("Right Height", right_height);
-	string t(millis_since_epoch());
-	results.setWriteTime(t);
-	results.writeToNetworkTables();
+	results.setWriteTime(millis_since_epoch());
 }
 
 int main(){
@@ -165,6 +166,24 @@ int main(){
             bitrate, ip, port);
 
 	mycam.open (CV_CAP_GSTREAMER_FILE, read_pipeline.c_str());
+	printf ("Succesfully opened camera with dimensions: %dx%d\n",
+            width, height);
 
-
+	cv::Mat currentFrame;
+	VisionResultsPackage results;
+	results.setNetworkTable(mNetworkTable);
+	results.setLogFile("newLogFile.txt");
+	for (long long frame = 0; ; frame++){
+		bool success = mycam.grabFrame();
+		if (success){
+			cout << "Frame: " << frame << endl;
+			IplImage* img = mycam.retrieveFrame(0);
+			currentFrame = cv::cvarrToMat(img);
+			ProcessImage(currentFrame, results);
+			results.writeToNetworkTables();
+			results.writeToLogFile();
+		}
+		usleep(10);
+	}
+	mycam.close();
 }

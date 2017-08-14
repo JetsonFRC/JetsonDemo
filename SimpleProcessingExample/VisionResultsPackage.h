@@ -4,10 +4,12 @@
 #include <string>
 #include <map>
 #include <iostream>
+#include <fstream>
 #include "networktables/NetworkTable.h"
 #include <memory>
 
 namespace JetsonCV {
+	typedef unsigned long long ui64;
 	class VisionResultsPackage{
 	private:
 		friend std::ostream& operator<< (std::ostream& os, VisionResultsPackage& vrp);
@@ -17,15 +19,15 @@ namespace JetsonCV {
 		std::map<std::string, double> mDoubles;
 		std::shared_ptr<NetworkTable> mNetworkTable;
 		std::string mLastSuccess;
-		std::string mLogFilename;
+		std::ofstream logStream;
 	public:
 		void put(std::string, int);//
 		void put(std::string, std::string);///
 		void put(std::string, bool);//
 		void put(std::string, double);//
-		void setWriteTime(std::string pSuccess) {mLastSuccess = pSuccess;}
+		void setWriteTime(ui64 pSuccess);
 		void setNetworkTable(std::shared_ptr<NetworkTable> pNetworkTable){mNetworkTable = pNetworkTable;}
-		void setLogFile(std::string pFilename){mLogFilename = pFilename;}
+		void setLogFile(const std::string& pFilename);
 		std::string getLastSuccessfulWrite() const {return mLastSuccess;}
 		void writeToNetworkTables();//
 		void writeToLogFile();//

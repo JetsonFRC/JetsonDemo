@@ -1,6 +1,6 @@
-#include "VisionProcessor.h"
-#include <fstream>
-
+#include "VisionResultsPackage.h"
+#include <sstream>
+#include <iostream>
 using namespace std;
 
 namespace JetsonCV{
@@ -21,10 +21,10 @@ namespace JetsonCV{
 	}
 
 	void VisionResultsPackage::writeToNetworkTables(){
-		for (pair<string, int> p : mInts){
+		for (pair<string, double> p : mDoubles){
 			mNetworkTable->PutNumber(p.first, p.second);
 		}
-		for (pair<string, double> p : mDoubles){
+		for (pair<string, int> p : mInts){
 			mNetworkTable->PutNumber(p.first, p.second);
 		}
 		for (pair<string, string> p : mStrings){
@@ -38,12 +38,23 @@ namespace JetsonCV{
 	}
 
 	void VisionResultsPackage::writeToLogFile(){
-		ofstream logFile(mLogFilename);
-		if(!logFile.good()){cout << "Unable to open " + mLogFilename << endl; return;}
-		logFile << *this;
+		if(!logStream.good()){cout << "Unable to open logfile" << endl; return;}
+		logStream << *this;
+	}
+
+	void VisionResultsPackage::setWriteTime(ui64 pSuccess){
+		ostringstream oss;
+		oss << pSuccess;
+		mLastSuccess = oss.str();
+	}
+
+	void VisionResultsPackage::setLogFile(const string& pFilename){
+		logStream.open(pFilename);
+		if(!logStream.good()){cout << "Unable to open " + pFilename << endl; return;}
 	}
 
 	ostream& operator<< (ostream& os, VisionResultsPackage& vrp) {
+		os << endl << "************************************************" << endl;
 		os << "LastUpdated ======== " << vrp.mLastSuccess << endl;
 		for (pair<string, int> p : vrp.mInts){
 			os << p.first << " ======== " << p.second << endl;
@@ -57,6 +68,7 @@ namespace JetsonCV{
 		for (pair<string, bool> p : vrp.mBools){
 			os << p.first << " ======== " << p.second << endl;
 		}
+		os << endl << "************************************************" << endl;
 		return os;
 
 	}
