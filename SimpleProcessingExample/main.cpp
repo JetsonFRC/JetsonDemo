@@ -1,9 +1,12 @@
-#include "VisionResultsPackage.h"
-#include "gst_pipeline.hpp"
-#include "helper.hpp"
+#include "VisionResultsPackage.h" //vision results package object
+#include "gst_pipeline.hpp" //gstreamer pipeline
+#include "helper.hpp" //other utility includes
 
 using namespace std;
 using namespace JetsonCV;
+
+
+//constants for image processing
 const double
 	MIN_AREA = 0.001, MAX_AREA = 1000000,
 	MIN_WIDTH = 0, MAX_WIDTH = 100000, //rectangle width
@@ -15,24 +18,27 @@ const int MIN_HUE = 55, MAX_HUE = 65;
 const int MIN_SAT = 0, MAX_SAT = 255;
 const int MIN_VAL = 50, MAX_VAL = 255;
 
+//parameters for gstreamer
 int device = 0;
 int width = 320;
 int height = 240;
 int framerate = 15;
 bool mjpeg = false;
-
 int bitrate = 600000;
 int port = 5805;
 
-string ip = "192.168.1.34";
+//ip addresses for network tables and the video receiver
+string netTablesIP = "192.168.1.34";
+string videoSinkIP = "192.168.1.34";
 
 shared_ptr<NetworkTable> mNetworkTable;
 typedef std::vector<cv::Point> contour_type;
 
+//initialize the NetworkTables and set the pointer to the correct table
 void startNetworkTables(shared_ptr<NetworkTable>& pNetworkTable, string tableName){
 	NetworkTable::SetClientMode();
     NetworkTable::SetDSClientEnabled(false);
-    NetworkTable::SetIPAddress(llvm::StringRef(ip));
+    NetworkTable::SetIPAddress(llvm::StringRef(netTablesIP));
     NetworkTable::Initialize();
 	pNetworkTable = NetworkTable::GetTable(tableName);
 }
@@ -45,7 +51,7 @@ bool is_valid (contour_type &contour) {
 	contour_type hull;
 	cv::convexHull(contour, hull);
 
-  double totalArea = (width * height);
+	double totalArea = (width * height);
 
 	//calculate relevant ratios & values
 	double area = cv::contourArea(contour) / totalArea;
@@ -68,6 +74,7 @@ bool is_valid (contour_type &contour) {
 	return valid;
 }
 
+//the main image processing loop finds the size of the largest contour
 void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 	//blur first
 
@@ -138,18 +145,12 @@ void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 			ur = all_points[i];
 		}
 	}
-	//find the center of mass of the largest contour
-	/*cv::Moments centerMass = cv::moments(largest, true);
-	double centerX = (centerMass.m10)/(centerMass.m00);
-	double centerY = (centerMass.m01)/(centerMass.m00);*/
-	
+
 	double top_width = ur.x - ul.x;
 	double bottom_width = lr.x - ll.x;
 	double left_height = ll.y - ul.y;
 	double right_height = lr.y - ur.y;
 
-	//results.put("Center X", centerX);
-	//results.put("Center Y", centerY);
 	results.put("Top Width", top_width);
 	results.put("Bottom Width", bottom_width);
 	results.put("Left Height", left_height);
@@ -160,26 +161,38 @@ void ProcessImage(cv::Mat& bgr, VisionResultsPackage& results){
 int main(){
 	startNetworkTables(mNetworkTable, "SimpleVisionProcessing");
 
+	//create a gstreamer spilt pipeline
 	CvCapture_GStreamer mycam;
     string read_pipeline = createReadPipelineSplit (
             device, width, height, framerate, mjpeg, 
-            bitrate, ip, port);
+            bitrate, videoSinkIP, port);
 
+	//open the camera on the read pipeline
 	mycam.open (CV_CAP_GSTREAMER_FILE, read_pipeline.c_str());
 	printf ("Succesfully opened camera with dimensions: %dx%d\n",
             width, height);
 
 	cv::Mat currentFrame;
+
+	//create and initialize results object
 	VisionResultsPackage results;
 	results.setNetworkTable(mNetworkTable);
 	results.setLogFile("newLogFile.txt");
+
+	//main loop
 	for (long long frame = 0; ; frame++){
 		bool success = mycam.grabFrame();
 		if (success){
 			cout << "Frame: " << frame << endl;
+
+			//get the image
 			IplImage* img = mycam.retrieveFrame(0);
 			currentFrame = cv::cvarrToMat(img);
+
+			//process the frame
 			ProcessImage(currentFrame, results);
+
+			//output the results
 			results.writeToNetworkTables();
 			results.writeToLogFile();
 		}
