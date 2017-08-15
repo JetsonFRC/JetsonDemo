@@ -1,0 +1,187 @@
+
+************************************************
+LastUpdated ======== 1502827117686
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827117725
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827117794
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827117859
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827117923
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827117994
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118062
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118131
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118195
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118268
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118331
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118393
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118453
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118525
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118594
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118664
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************
+
+************************************************
+LastUpdated ======== 1502827118722
+Total Contours Found ======== 1
+Bottom Width ======== 20
+Largest Contour Area ======== 4350.5
+Left Height ======== 179
+Right Height ======== 176
+Top Width ======== 24
+
+************************************************

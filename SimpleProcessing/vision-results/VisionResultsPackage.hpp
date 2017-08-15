@@ -1,5 +1,5 @@
-#ifndef VISION_RESULTS_PACKAGE_H
-#define VISION_RESULTS_PACKAGE_H
+#ifndef VISION_RESULTS_PACKAGE_HPP
+#define VISION_RESULTS_PACKAGE_HPP
 
 #include <string>
 #include <map>

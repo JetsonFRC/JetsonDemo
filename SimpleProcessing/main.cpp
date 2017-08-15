@@ -1,4 +1,4 @@
-#include "VisionResultsPackage.h" //vision results package object
+#include "VisionResultsPackage.hpp" //vision results package object
 #include "gst_pipeline.hpp" //gstreamer pipeline
 #include "helper.hpp" //other utility includes
 

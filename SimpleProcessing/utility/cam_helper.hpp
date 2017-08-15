@@ -5,7 +5,9 @@ Helper utilities for interacting with camera settings
 #ifndef CAM_HELPER_HPP
 #define CAM_HELPER_HPP
 
-#include "helper.hpp"
+#include <stdlib.h>
+#include <stdio.h>
+using namespace std;
 
 /**
  * struct to hold camera setting information
@@ -51,7 +53,7 @@ struct CameraSettings {
 };
 
 inline bool operator== (const CameraSettings &s1,const CameraSettings &s2) {
-    returnn
+    return
         s1.brightness == s2.brightness &&
         s1.contrast == s2.contrast &&
         s1.saturation == s2.saturation &&

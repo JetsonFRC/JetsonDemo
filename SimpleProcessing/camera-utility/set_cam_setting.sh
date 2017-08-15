@@ -1,1 +1,0 @@
-v4l2-ctl -d /dev/video$1 --set-ctrl $2=$3

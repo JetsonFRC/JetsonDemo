@@ -96,7 +96,7 @@ bool verbose = true;
 
 void flash_good_settings() {
     char setting_script[100];
-    sprintf (setting_script, "bash camera_settings.sh %d", device);
+    sprintf (setting_script, "bash good_settings.sh %d", device);
     system (setting_script);
 }
 
@@ -123,8 +123,6 @@ int main () {
     string read_pipeline = createReadPipelineSplit (
             device, width, height, framerate, mjpeg, 
             bitrate, ip, port_stream);
-    // string read_pipeline = createReadPipeline (
-    //         device, width, height, framerate, mjpeg);
     if (verbose) {
         printf ("GStreamer read pipeline: %s\n", read_pipeline.c_str()); 
     }
@@ -155,6 +153,9 @@ int main () {
 
     //take each frame from the pipeline
     for (long long frame = 0; ; frame++) {
+        //have to alternate from bad settings to good settings on some cameras
+        //because of weird firmware issues, sometimes the flash doesn't stick 
+        //otherwise
         if (frame < 10) {
             flash_bad_settings();
         }
