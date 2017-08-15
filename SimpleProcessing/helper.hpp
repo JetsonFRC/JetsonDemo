@@ -1,3 +1,9 @@
+/*
+Helper file which includes useful libraries, typedefs, macros, and functions
+Feel free to add utility functions, macros, imports, etc to this file if you 
+need them throughout your project
+*/
+
 #ifndef HELPER_HPP
 #define HELPER_HPP
 
@@ -26,7 +32,13 @@ using namespace std::chrono;
 typedef unsigned long long ui64;
 typedef long long i64;
 
-//helper function to get system time
+/**
+ * helper function to get current time in millis since epoch
+ * useful for synchronizing between jetson & rio and timing delays
+ * warning: if your jetson carrier may not have a battery and thus the clock
+ * may become unsynchronized
+ * @return millis since epoch
+ */
 extern inline ui64 millis_since_epoch() {
     ui64 time = (time_point_cast<milliseconds>
         (system_clock::now()).time_since_epoch()).count();

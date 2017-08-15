@@ -1,3 +1,7 @@
+/*
+Helper functions for creating gstreamer pipelines that interact with opencv
+*/
+
 #ifndef GST_PIPELINE_HPP
 #define GST_PIPELINE_HPP
 

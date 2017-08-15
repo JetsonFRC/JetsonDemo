@@ -1,21 +1,34 @@
 #include "cam_helper.hpp"
 
-void flash_setting (int device, string setting, int value) {
-    char setting_script[100];
-    sprintf (setting_script, "bash /3419/JetsonDemo/ParamChooser/camera-utility/set_cam_setting.sh %d %s %d", 
-        device, setting.c_str(), value);
-    system (setting_script);
-}
+void flash_settings (int device, const CameraSettings &settings) {
+    char setting_script[1000];
 
-void flash_settings (int device, CameraSettings settings) {
-    flash_setting (device, "brightness", settings.brightness);
-    flash_setting (device, "contrast", settings.contrast);
-    flash_setting (device, "saturation", settings.saturation);
-    flash_setting (device, "white_balance_temperature_auto", settings.white_balance_temperature_auto);
-    flash_setting (device, "white_balance_temperature", settings.white_balance_temperature);
-    flash_setting (device, "power_line_frequency", settings.power_line_frequency);
-    flash_setting (device, "sharpness", settings.sharpness);
-    flash_setting (device, "backlight_compensation", settings.backlight_compensation);
-    flash_setting (device, "exposure_auto", settings.exposure_auto);
-    flash_setting (device, "exposure_absolute", settings.exposure_absolute);
+    //create system call to use v4l2 to change camera settings according
+    //to data in CameraSettings struct
+    sprintf (setting_script, 
+        "v4l2-ctl -d /dev/video%d  "
+            "--set-ctrl brightness=%d "
+            "--set-ctrl contrast=%d "
+            "--set-ctrl saturation=%d "
+            "--set-ctrl white_balance_temperature_auto=%d "
+            "--set-ctrl white_balance_temperature=%d "
+            "--set-ctrl power_line_frequency=%d "
+            "--set-ctrl sharpness=%d "
+            "--set-ctrl backlight_compensation=%d "
+            "--set-ctrl exposure_auto=%d "
+            "--set-ctrl exposure_absolute=%d ",
+        device, 
+        settings.brightness,
+        settings.contrast,
+        settings.saturation,
+        settings.white_balance_temperature_auto,
+        settings.white_balance_temperature,
+        settings.power_line_frequency,
+        settings.sharpness,
+        settings.backlight_compensation,
+        settings.exposure_auto,
+        settings.exposure_absolute);
+
+    //run the system call created in the above step
+    system (setting_script);
 }

@@ -1,5 +1,12 @@
+/*
+ * Useful file for color related utilities including retrieving color 
+ * information from an image, color constants, and drawing points on an image
+ */
+
 #ifndef COLOR_HPP
 #define COLOR_HPP
+
+
 
 const cv::Scalar RED (0, 0, 255);
 const cv::Scalar BLUE (255, 0, 0);

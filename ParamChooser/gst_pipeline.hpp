@@ -1,8 +1,13 @@
+/*
+Helper functions for creating gstreamer pipelines that interact with opencv
+*/
+
 #ifndef GST_PIPELINE_HPP
 #define GST_PIPELINE_HPP
 
 #include <string>
 #include <stdio.h>
+
 
 /**
  * returns a gstreamer pipeline for reading an image from the camera
@@ -14,9 +19,9 @@
  * @param mjpeg whether or not to use mjpeg compression on the camera hardware 
         before image grabbed by jetson; could decrease usb bandwith but increase
         time to decode. If false, grabs raw yuyv image.
- * @return gstreamer pipeling string to feed to CvCapture_GStreamer class
+ * @return gstreamer pipeling std::string to feed to CvCapture_GStreamer class
  */
-extern string createReadPipeline (int vid_device, int width, int height, 
+extern std::string createReadPipeline (int vid_device, int width, int height, 
     int framerate, bool mjpeg) {
 
     char buff[500];
@@ -35,7 +40,7 @@ extern string createReadPipeline (int vid_device, int width, int height,
             vid_device, width, height, framerate);
     }
 
-    string pipstring = buff;
+    std::string pipstring = buff;
     printf ("read string: %s\n", pipstring.c_str());
     return pipstring;
 }
@@ -57,8 +62,8 @@ extern string createReadPipeline (int vid_device, int width, int height,
  * @param port destination port of the image
  * @return gstreamer pipeling string to feed to CvCapture_GStreamer class
  */
-extern string createReadPipelineSplit (int vid_device, int width, int height, 
-    int framerate, bool mjpeg, int bitrate, string ip, int port) {
+extern std::string createReadPipelineSplit (int vid_device, int width, int height, 
+    int framerate, bool mjpeg, int bitrate, std::string ip, int port) {
 
     char buff[500];
     if (mjpeg) {
@@ -86,7 +91,7 @@ extern string createReadPipelineSplit (int vid_device, int width, int height,
             vid_device, width, height, framerate, bitrate, ip.c_str(), port);
     }
 
-    string pipstring = buff;
+    std::string pipstring = buff;
     printf ("read string: %s\n", pipstring.c_str());
     return pipstring;
 }
@@ -102,8 +107,8 @@ extern string createReadPipelineSplit (int vid_device, int width, int height,
  * @param port destination port of the image
  * @return gstreamer pipeling string to feed to CvVideoWriter_GStreamer class
  */
-extern string create_write_pipeline (int width, int height, int framerate, 
-    int bitrate, string ip, int port) {
+extern std::string create_write_pipeline (int width, int height, int framerate, 
+    int bitrate, std::string ip, int port) {
 
     char buff[500];
     sprintf (buff,
@@ -113,7 +118,7 @@ extern string create_write_pipeline (int width, int height, int framerate,
         "udpsink host=%s port=%d",
         width, height, framerate, bitrate, ip.c_str(), port);
 
-     string pipstring = buff;
+     std::string pipstring = buff;
     
     printf ("write string: %s\n", pipstring.c_str());
     return pipstring;
