@@ -17,7 +17,7 @@ height = 240,
 framerate = 15, 
 mjpeg = false; //mjpeg is not better than just grabbing a raw image in this case
 
-//network parameters
+//network parameters: change this according to your specific network configuration
 int
 bitrate = 600000, //kbit/sec over network
 port_stream = 5806, //destination port for raw image
