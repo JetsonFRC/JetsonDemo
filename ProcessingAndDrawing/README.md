@@ -22,6 +22,14 @@ over the network in main.cpp. A modified image from the OpenCV pipeline
 (possibly drawn on, thresholded, etc) is sent over gstreamer to the driver 
 station laptop after calculation.
 
+Camera settings must be done in a weird way; the script good_settings.sh 
+_should_ set the correct settings, but in our experience some cameras do not get 
+flashed correctly by just running this script in isolation. Instead, we set 
+incorrect settings first using bad_settings.sh and then later set the correct 
+settings; this seemed to work more consistently. We do not know why just using
+good_settings.sh does not work consistently and suspect it may be a firmware 
+issue on some cameras.
+
 Note: The timestamp sent back may not be synchronized with the rio time 
 if your carrier board does not have a battery powered clock. If you need to know 
 the delay time between the time an image was grabbed and the time its data was 
@@ -56,4 +64,6 @@ ParamChooser project to determine good camera parameters and thresolding
 parameters before launching this project. 
 
 Add drawing to your calculate function to better debug the vision pipeline and 
-have robust visual feedback. You can also 
+have robust visual feedback. You can also put variables about the robot on 
+NetworkTables from the rio, read them from the Jetson, and draw them from the 
+calculate function.
