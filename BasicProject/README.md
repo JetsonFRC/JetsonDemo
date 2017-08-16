@@ -6,4 +6,4 @@ Contents include:
 + cap_gstreamer.cpp class for allowing OpenCV to interact with GStreamer, implements CvCapture_GStreamer class and CvVideoWriter_GStreamer classes.
 + utility files for setting camera settings
 + utility files for creating gstreamer pipelines
-+ Makefile which includes proper libraries and and paths for building
++ Makefile which includes necessary libraries
