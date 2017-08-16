@@ -15,9 +15,12 @@ target)
 When you run the program it opens a gstreamer pipeline with two
 parts, one that sends a raw image to your driver station laptop, and another 
 that feeds the raw image into an OpenCV pipeline and sends back a modified 
-version of the image. Additionally, results of vision processing are sent over 
-NetworkTables so then can be viewed on the SmartDashboard and used within your
-robot code. 
+version of the image. Raw camera images are passed to the "calculate" method in
+vision.cpp, which performs an OpenCV pipeline and stores the results in a 
+VisionResultsPackage struct. Data from this struct is logged locally and sent
+over the network in main.cpp. A modified image from the OpenCV pipeline 
+(possibly drawn on, thresholded, etc) is sent over gstreamer to the driver 
+station laptop after calculation.
 
 Note: The timestamp sent back may not be synchronized with the rio time 
 if your carrier board does not have a battery powered clock. If you need to know 
@@ -44,4 +47,10 @@ that is certainly a good alternative to NetworkTables.
 
 Under "network parameters" in main.cpp, enter the ip address of your 
 driverstation computer. If you have not done so already, set a static ip address
-on your driverstation computer.
+on your driverstation computer. 
+
+Edit vision.cpp and vision.hpp to modify the vision pipeline, you can keep the 
+current structure if you wish. See the SimpleProcessing example for a more 
+advanced VisionResultsPackage datastructure you can also use. 
+
+Modify
