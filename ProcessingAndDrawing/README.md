@@ -51,4 +51,9 @@ on your driverstation computer.
 
 Edit vision.cpp and vision.hpp to modify the vision pipeline, you can keep the 
 current structure if you wish. See the SimpleProcessing example for a more 
-advanced VisionResultsPackage datastructure you can also use. 
+advanced VisionResultsPackage datastructure you may use. You should use the 
+ParamChooser project to determine good camera parameters and thresolding 
+parameters before launching this project. 
+
+Add drawing to your calculate function to better debug the vision pipeline and 
+have robust visual feedback. You can also 

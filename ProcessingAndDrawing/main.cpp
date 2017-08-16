@@ -1,5 +1,6 @@
 #include "helper.hpp"
 #include "gst_pipeline.hpp"
+#include "vision.hpp"
 
 using namespace std;
 
