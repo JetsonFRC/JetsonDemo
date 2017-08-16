@@ -23,11 +23,13 @@ the best thresolded image.
 
 ## Instructions ##
 
-To use, run the OutlineViewer program on your dashboard laptop in the directory 
-wpilib/tools/OutlineViewer.jar 
+Under "network parameters" in main.cpp, enter the ip address of your 
+driverstation computer. If you have not done so already, set a static ip address
+on your driverstation computer.
 
-Start a server at the IP address of your computer, and edit this program to send 
-to the correct IP address (look under "network paramaters" in main.cpp). 
-Modify the values in the outline viewer to change camera and pipeline 
-parameters, and view the affects of these changes with the gstreamer viewers 
-on your laptop.
+Run the OutlineViewer program on your dashboard laptop in the directory 
+wpilib/tools/OutlineViewer.jar so you can access NetworkTables.
+
+After compiling and running this project, modify the values in the outline 
+viewer to change camera and pipeline parameters, and view the affects of these 
+changes with the gstreamer viewers on your laptop.

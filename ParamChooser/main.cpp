@@ -2,7 +2,6 @@
 #include "cam_helper.hpp"
 #include "gst_pipeline.hpp"
 #include "color.hpp"
-#include "cam_helper.hpp"
 
 using namespace std;
 
