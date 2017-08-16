@@ -1,6 +1,6 @@
 #include "helper.hpp"
 #include "gst_pipeline.hpp"
-#include "vision.hpp"
+#include "vision.hppq"
 
 using namespace std;
 
@@ -136,82 +136,6 @@ void fillCircle (cv::Mat img, int rad, cv::Point center) {
     int thickness = -1;
     int lineType = 8;
     cv::circle (img, center, rad, cv::Scalar(0, 0, 255), thickness, lineType);
-}
-
-string createReadPipeline (int vid_device, int width, int height, 
-    int framerate, bool mjpeg) {
-
-    char buff[500];
-    if (mjpeg) {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "image/jpeg,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! "
-            "jpegdec ! autovideoconvert ! appsink",
-            vid_device, width, height, framerate);
-    } 
-    else {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "video/x-raw,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! "
-            "autovideoconvert ! appsink",
-            vid_device, width, height, framerate);
-    }
-
-    string pipstring = buff;
-    printf ("read string: %s\n", pipstring.c_str());
-    return pipstring;
-}
-
-string createReadPipelineSplit (
-    int vid_device, int width, int height, int framerate, bool mjpeg,
-    int bitrate, string ip, int port) {
-
-    char buff[500];
-    if (mjpeg) {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "image/jpeg,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! jpegdec ! "
-            "tee name=split "
-                "split. ! queue ! videoconvert ! omxh264enc bitrate=%d ! "
-                    "video/x-h264, stream-format=(string)byte-stream ! h264parse ! "
-                    "rtph264pay ! udpsink host=%s port=%d "
-                "split. ! queue ! autovideoconvert ! appsink",
-            //"appsink",
-            vid_device, width, height, framerate, bitrate, ip.c_str(), port);
-    } 
-    else {
-        sprintf (buff,
-            "v4l2src device=/dev/video%d ! "
-            "video/x-raw,format=(string)BGR,width=(int)%d,height=(int)%d,framerate=(fraction)%d/1 ! "
-            "tee name=split "
-                "split. ! queue ! videoconvert ! omxh264enc bitrate=%d ! "
-                    "video/x-h264, stream-format=(string)byte-stream ! h264parse ! "
-                    "rtph264pay ! udpsink host=%s port=%d "
-                "split. ! queue ! autovideoconvert ! appsink",
-            //"appsink",
-            vid_device, width, height, framerate, bitrate, ip.c_str(), port);
-    }
-
-    string pipstring = buff;
-    printf ("read string: %s\n", pipstring.c_str());
-    return pipstring;
-}
-
-string create_write_pipeline (int width, int height, int framerate, 
-    int bitrate, string ip, int port) {
-
-    char buff[500];
-    sprintf (buff,
-        "appsrc ! "
-        "video/x-raw, format=(string)BGR, width=(int)%d, height=(int)%d, framerate=(fraction)%d/1 ! "
-        "videoconvert ! omxh264enc bitrate=%d ! video/x-h264, stream-format=(string)byte-stream ! h264parse ! rtph264pay ! "
-        "udpsink host=%s port=%d",
-        width, height, framerate, bitrate, ip.c_str(), port);
-
-     string pipstring = buff;
-    
-    printf ("write string: %s\n", pipstring.c_str());
-    return pipstring;
 }
 
 void pushToNetworkTables (VisionResultsPackage info) {
