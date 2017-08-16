@@ -52,5 +52,3 @@ on your driverstation computer.
 Edit vision.cpp and vision.hpp to modify the vision pipeline, you can keep the 
 current structure if you wish. See the SimpleProcessing example for a more 
 advanced VisionResultsPackage datastructure you can also use. 
-
-Modify
